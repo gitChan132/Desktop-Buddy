@@ -6,7 +6,9 @@ frog-flavoured micro-intervention. Built with **Tauri v2 + React + Rust** for Ha
 
 The frog lives on a translucent lily pad in the bottom-right of your screen, is draggable,
 and only intercepts the cursor inside its own hitbox. Interventions appear as a
-glassmorphic speech bubble and auto-dismiss after 10 seconds.
+glassmorphic speech bubble and auto-dismiss after 10 seconds. Clicking him opens a
+persona-locked chat, and the tray/top-bar pond panel holds status, settings, guided
+activities and modes.
 
 ## Detection
 
@@ -18,10 +20,29 @@ glassmorphic speech bubble and auto-dismiss after 10 seconds.
 | `cursor_oscillation` | ≥6 back-and-forth cursor reversals in 10s |
 | `tab_thrashing` | >8 foreground window switches in 20s |
 | `idle_freeze` | 2.5 min of zero input while a browser/editor is frontmost |
+| `doomscroll` | feed frontmost ≥4 min with ≥40 scrolls / 90s (30s fast lane for Shorts) |
 
 Each intervention's copy comes from Gemini (`gemini-2.5-flash` by default) with a
-deterministic fallback. Only timing metadata and the active window title ever leave the
-machine — no key contents, text, or screenshots. Nudges are throttled to one per 45 seconds.
+deterministic fallback. Left to itself the app sends only timing metadata and the active
+window title — no key contents, screenshots or clipboard. Nudge spacing depends on the
+mode: Focus 25s, Chill 120s, Fun 30s (default Focus).
+
+**The one exception is selection summaries.** When you highlight a long passage (400+
+chars) the frog offers to summarize it; if you accept, that passage is sent to Gemini.
+The watcher reads the selection through macOS Accessibility only, never the clipboard,
+and the offer can be switched off in the pond's settings.
+
+## Beyond nudges
+
+- **Guided activities** — belly breathing, look-away grounding, one-thing intention,
+  and a 30s mindful pause. Each is its own component; the frog joins on the lilypad.
+- **Frog chat** — click him when no nudge is up. Fixed persona, no AI talk, no history
+  kept between opens.
+- **Pond panel** (tray/top bar) — status sparklines, settings (sounds, volume, pause
+  nudges, selection summaries, per-trigger and per-activity toggles), activities, and
+  modes (Focus / Chill / Fun).
+- **Modes** — Focus nudges early and judges everything; Chill stretches the cooldown to
+  2 min and mutes the doomscroll detector; Fun keeps it brisk and light.
 
 See [`scope.md`](scope.md) for the full product scope and [`handoff.md`](handoff.md) for
 current state and dev notes.
@@ -67,4 +88,5 @@ npm run build                      # production frontend build
 ## Stack
 
 Tauri v2 · React 19 · TypeScript · Vite · Tailwind CSS v4 · Framer Motion ·
-Rust (`rdev`, `active-win-pos-rs`, `reqwest`) · Web Audio API.
+Rust (`rdev`, `active-win-pos-rs`, `reqwest`, `objc2` + ApplicationServices AX) ·
+Web Audio API.

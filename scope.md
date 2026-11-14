@@ -14,10 +14,20 @@ bottom-right of the screen.
 2. **Context-aware AI interventions** — when a signal crosses threshold the engine asks
    Gemini (`gemini-2.5-flash`) for one warm, frog-flavoured sentence that names the exact
    signal (e.g. "40 backspaces?"). Deterministic fallback copy is used if the model or key is
-   unavailable. Each nudge fires once per 45 seconds per process.
+   unavailable. Nudge spacing follows the mode: Focus 25s, Chill 120s, Fun 30s.
 3. **Kinetic overlay** — transparent, frameless, always-on-top window with a click-through
    hitbox. Spring-physics frog, draggable/carryable, glassmorphic speech bubble that
    auto-dismisses after 10s, and a guided breathing modal with a Web Audio chime.
+4. **Guided activities & chat** — belly breathing, look-away grounding, one-thing
+   intention, 30s mindful pause, and a persona-locked chat with guardrails. History is
+   per-open; nothing is persisted.
+5. **Pond panel** — tray/top-bar popover with status sparklines, settings, activity
+   launcher and modes. Settings cover sounds, volume, paused nudges, selection summaries,
+   and per-trigger/per-activity toggles; they are session-only and broadcast live.
+6. **Selection summaries** — the *only* path where user text leaves the machine. A poll
+   reads the focused app's selected text through Accessibility (never the clipboard); a
+   400+ char highlight that holds offers a Gemini summary, which the user must accept.
+   Switchable off in settings.
 
 ## Detection matrix
 
@@ -31,8 +41,9 @@ bottom-right of the screen.
 | `idle_freeze` | ≥150s (2.5 min) zero input while a browser/editor is frontmost | Stuck, not resting | `visual_grounding` |
 | `doomscroll` | TikTok/Instagram app or a browser feed tab frontmost ≥4 min, ≥40 wheel events / 90s, <10 keystrokes / 30s | Compulsive scrolling | `visual_grounding` |
 
-Priority order when several are true: backspace_loop → frantic_typing → cursor_hesitation →
-cursor_oscillation → tab_thrashing → idle_freeze.
+Priority order when several are true: shorts fast lane → backspace_loop → frantic_typing →
+cursor_hesitation → cursor_oscillation → tab_thrashing → doomscroll → idle_freeze. Chill
+mode mutes `doomscroll` no matter what its toggle says.
 
 ### Pond-ripple stress score (0.0–1.0)
 
@@ -113,7 +124,11 @@ Emitted on the `trigger-intervention` Tauri event; bubbles hold for
 ## Status
 
 - All seven triggers verified end-to-end against the live app (real injection + Gemini).
-- 47 Rust unit tests passing; `tsc --noEmit` and `vite build` clean.
+- 54 Rust unit tests passing; `tsc --noEmit` and `vite build` clean.
+- Selection watcher verified in VS Code (Electron) and Brave (Chromium); native apps via
+  plain `AXSelectedText`. It retries when an app's tree isn't up yet and re-prompts for the
+  Accessibility grant until it is given.
+- Settings panel covers every feature (triggers, activities, sounds, summaries, modes).
 - Fast-test env overrides: `FROG_EVAL_SECS`, `FROG_IDLE_FREEZE_SECS`,
   `FROG_FORCE_TRIGGER` (see `handoff.md`).
 - Pre-ship cleanup: remove debug `eprintln!` tick/emit logs and the `FROG_FORCE_TRIGGER` hook.

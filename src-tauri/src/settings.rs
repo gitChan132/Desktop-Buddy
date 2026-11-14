@@ -1,5 +1,6 @@
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
+use std::time::Duration;
 
 /// Trigger ids, in bit order. Keep in sync with `BurnoutTrigger` in types.ts.
 const TRIGGERS: [&str; 7] = [
@@ -19,6 +20,19 @@ const ACTIVITIES: [&str; 4] = [
     "task_intent",
     "mindful_pause",
 ];
+
+/// Mode ids, in bit order. Keep in sync with `PondMode` in settings.ts.
+const MODES: [&str; 3] = ["focus", "chill", "fun"];
+
+/// Mood of the pond. Focus nudges sooner, Chill leaves you alone, Fun keeps it
+/// light and quick.
+#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Mode {
+    Focus,
+    Chill,
+    Fun,
+}
 
 /// Which detectors are allowed to fire.
 static TRIGGER_BITS: AtomicU8 = AtomicU8::new((1u8 << 7) - 1);
@@ -77,11 +91,17 @@ pub struct Settings {
     pub nudges_paused: bool,
     pub sound_enabled: bool,
     pub volume: f32,
+    pub mode: Mode,
+    pub selection_summaries: bool,
     pub triggers: TriggerSettings,
     pub activities: ActivitySettings,
 }
 
 static NUDGES_PAUSED: AtomicBool = AtomicBool::new(false);
+/// Offers to summarize long highlights.
+static SELECTION_SUMMARIES: AtomicBool = AtomicBool::new(true);
+/// Index into `MODES`; 0 is Focus.
+static MODE: AtomicU8 = AtomicU8::new(0);
 static SOUND_ENABLED: AtomicBool = AtomicBool::new(true);
 /// Croak loudness in `0.0..=1.0`, stored as raw f32 bits to stay lock-free.
 static VOLUME: AtomicU32 = AtomicU32::new(0.5f32.to_bits());
@@ -91,6 +111,8 @@ pub fn settings() -> Settings {
         nudges_paused: NUDGES_PAUSED.load(Ordering::Relaxed),
         sound_enabled: SOUND_ENABLED.load(Ordering::Relaxed),
         volume: f32::from_bits(VOLUME.load(Ordering::Relaxed)),
+        mode: mode(),
+        selection_summaries: selection_summaries(),
         triggers: TriggerSettings {
             frantic_typing: trigger_enabled("frantic_typing"),
             backspace_loop: trigger_enabled("backspace_loop"),
@@ -117,6 +139,39 @@ pub fn sound_enabled() -> bool {
     SOUND_ENABLED.load(Ordering::Relaxed)
 }
 
+pub fn mode() -> Mode {
+    match MODE.load(Ordering::Relaxed) {
+        1 => Mode::Chill,
+        2 => Mode::Fun,
+        _ => Mode::Focus,
+    }
+}
+
+/// Unknown names are ignored so a stale panel can't wedge the mode.
+pub fn set_mode(name: &str) {
+    if let Some(index) = index_of(&MODES, name) {
+        MODE.store(index, Ordering::Relaxed);
+    }
+}
+
+/// How often the frog may interrupt. Focus nips problems early, Chill stays
+/// mostly out of the way, Fun is brisk but light.
+pub fn intervention_cooldown() -> Duration {
+    match mode() {
+        Mode::Focus => Duration::from_secs(25),
+        Mode::Chill => Duration::from_secs(120),
+        Mode::Fun => Duration::from_secs(30),
+    }
+}
+
+pub fn selection_summaries() -> bool {
+    SELECTION_SUMMARIES.load(Ordering::Relaxed)
+}
+
+pub fn set_selection_summaries(enabled: bool) {
+    SELECTION_SUMMARIES.store(enabled, Ordering::Relaxed);
+}
+
 pub fn set_nudges_paused(paused: bool) {
     NUDGES_PAUSED.store(paused, Ordering::Relaxed);
 }
@@ -131,6 +186,12 @@ pub fn set_volume(volume: f32) {
 
 pub fn trigger_enabled(id: &str) -> bool {
     is_enabled(&TRIGGER_BITS, &TRIGGERS, id)
+}
+
+/// What the detectors may act on: Chill mutes doomscroll so scrolling around
+/// doesn't get judged, whatever the toggle says.
+pub fn detector_enabled(id: &str) -> bool {
+    trigger_enabled(id) && !(id == "doomscroll" && mode() == Mode::Chill)
 }
 
 pub fn set_trigger_enabled(id: &str, enabled: bool) {

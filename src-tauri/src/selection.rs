@@ -16,6 +16,7 @@ use objc2_core_foundation::{CFBoolean, CFRetained, CFString};
 use tauri::{AppHandle, Emitter};
 
 use crate::chat::SelectionReadyPayload;
+use crate::settings;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(900);
 /// Selections shorter than this are not a "wall of text".
@@ -52,6 +53,8 @@ unsafe extern "C" {
 #[link(name = "CoreFoundation", kind = "framework")]
 unsafe extern "C" {
     fn CFRelease(value: *const c_void);
+    fn CFGetTypeID(value: CFTypeRef) -> usize;
+    fn CFStringGetTypeID() -> usize;
     fn CFBooleanGetValue(value: CFTypeRef) -> bool;
 }
 
@@ -81,6 +84,10 @@ unsafe fn release(value: CFTypeRef) {
 /// Reads a CFString into an owned Rust string.
 #[cfg(target_os = "macos")]
 unsafe fn string_from(value: CFTypeRef) -> Option<String> {
+    // The attribute could be anything; casting blind would be UB.
+    if unsafe { CFGetTypeID(value) } != unsafe { CFStringGetTypeID() } {
+        return None;
+    }
     let string = NonNull::new(value as *mut CFString)?;
     // Display copies through CFStringGetBytes, so it also handles the
     // UTF-16-backed strings Chromium apps hand back; `as_str_unchecked` only
@@ -139,6 +146,13 @@ fn selected_text(last_manual_pid: &mut i32) -> Option<String> {
         }
         let focused = copy_attribute(app, "AXFocusedUIElement");
         release(app as CFTypeRef);
+        // Nothing focused usually means the app's tree isn't up yet (permission
+        // granted late, Chromium restart): forget the pid so the next tick tries
+        // enabling again. Safe while nothing is focused — there is no selection
+        // to lose.
+        if focused.is_none() {
+            *last_manual_pid = -1;
+        }
         let focused = focused?;
 
         // Never read selections out of password-style fields.
@@ -171,13 +185,6 @@ fn digest(text: &str) -> u64 {
 /// Polls the selection on a background thread for the life of the app.
 pub fn spawn(app: AppHandle) {
     std::thread::spawn(move || {
-        #[cfg(target_os = "macos")]
-        if unsafe { !AXIsProcessTrusted() } {
-            // Surface once; the frontend shows a hint that links to the
-            // Accessibility settings pane.
-            let _ = app.emit(EVENT_SELECTION_UNAVAILABLE, ());
-        }
-
         // Last selection seen on the previous tick, and how many ticks it has
         // survived so far — a drag in progress keeps changing it.
         let mut previous: Option<u64> = None;
@@ -185,9 +192,23 @@ pub fn spawn(app: AppHandle) {
         let mut last_offered: Option<u64> = None;
         let mut last_offer_at: Option<Instant> = None;
         let mut manual_pid: i32 = -1;
+        let mut tick: u64 = 0;
 
         loop {
             std::thread::sleep(POLL_INTERVAL);
+            tick = tick.wrapping_add(1);
+            // The webview usually subscribes after this thread starts, so a
+            // one-shot emit would be lost. Re-send until the grant lands.
+            #[cfg(target_os = "macos")]
+            if tick % 6 == 1 && unsafe { !AXIsProcessTrusted() } {
+                let _ = app.emit(EVENT_SELECTION_UNAVAILABLE, ());
+            }
+            // The panel can switch offers off without killing the watcher.
+            if !settings::selection_summaries() {
+                previous = None;
+                stable_ticks = 0;
+                continue;
+            }
             let selected = selected_text(&mut manual_pid);
             let trimmed = selected
                 .as_deref()

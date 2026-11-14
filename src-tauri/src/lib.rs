@@ -290,6 +290,18 @@ fn set_sound_volume(app: AppHandle, volume: f32) {
 }
 
 #[tauri::command]
+fn set_mode(app: AppHandle, mode: String) {
+    settings::set_mode(&mode);
+    broadcast_settings(&app);
+}
+
+#[tauri::command]
+fn set_selection_summaries(app: AppHandle, enabled: bool) {
+    settings::set_selection_summaries(enabled);
+    broadcast_settings(&app);
+}
+
+#[tauri::command]
 fn set_trigger_enabled(app: AppHandle, trigger: String, enabled: bool) {
     settings::set_trigger_enabled(&trigger, enabled);
     broadcast_settings(&app);
@@ -457,6 +469,8 @@ pub fn run() {
             set_nudges_paused,
             set_sound_enabled,
             set_sound_volume,
+            set_mode,
+            set_selection_summaries,
             set_trigger_enabled,
             set_activity_enabled,
             quit_app,

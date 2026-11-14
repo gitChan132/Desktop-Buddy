@@ -12,7 +12,7 @@ Clicking the frog also opens a persona-locked chat (`src-tauri/src/chat.rs`).
 ## Current state (Nov 2026)
 - **All seven triggers work end-to-end** (real injected input + live Gemini), verified against
   the running app.
-- 53 Rust unit tests pass; `tsc --noEmit` and `vite build` clean.
+- 54 Rust unit tests pass; `tsc --noEmit` and `vite build` clean.
 - **Frog chat is the default click action** when no nudge is up. It is chat-only: fixed
   system persona, input guardrails (AI-identity questions, prompt injection, homework,
   math, code, trivia), reply leak filter, and crisis guidance (988). History is per-open
@@ -20,6 +20,12 @@ Clicking the frog also opens a persona-locked chat (`src-tauri/src/chat.rs`).
 - Five guided activities: breathing, visual grounding (~29s), task intention (name one
   priority + 20s hold), mindful pause (30s), and the chat. Each has its own component and
   `suggestedAction`; guides are opened by clicking the frog while their nudge is up.
+- **Pond panel** (`SettingsPond.tsx`, 760×540, tray/top bar) has four tabs: status
+  sparklines, settings, guided activities, and modes. Every control is live and broadcast
+  through the `frog-settings` event.
+- **Selection summaries** (`selection.rs` + `SelectionOffer.tsx`): a 900 ms poll reads the
+  focused app's `AXSelectedText`; a 400+ char highlight that holds for two ticks makes the
+  frog offer a summary via `selection-ready`. Verified in VS Code and Brave.
 - Frontend also has the draggable frog with carry physics and the 10s speech bubble.
 
 ### Triggers
@@ -46,7 +52,8 @@ writes the copy.
 - Scroll window 90s (30s view for Shorts); title-change/flip window 30s.
 - Backspace streak ends after 5s of no backspace. Thrash window 20s, polled every 2s.
 - Idle freeze default **150s (2.5 min)**. Evaluation loop every **10s**. Intervention
-  cooldown **45s per process**. Restart between e2e tests that need a fresh nudge.
+  cooldown is set by the mode: **Focus 25s, Chill 120s, Fun 30s** (default Focus). Restart
+  between e2e tests that need a fresh nudge.
 - Stress weights: keys .25, backspaces .15, velocity .15, jitter .10, hesitation .15,
   oscillation .20.
 
@@ -67,6 +74,37 @@ writes the copy.
   with a fixed frog line; `reply_leaks_persona` replaces replies that mention AI/model or
   contain code fences. Message cap 400 chars.
 - These are heuristics layered under the fixed system prompt — not a moderation model.
+
+## Settings & modes (`src-tauri/src/settings.rs`, `src/settings.ts`)
+- One lock-free atomic store shared by the pond, the popover, the tray menu and the
+  evaluation loop. Session-only: defaults return on relaunch.
+- Surface: paused nudges, croak sounds, volume, selection summaries, per-trigger bits
+  (7), per-activity bits (4), and `mode`.
+- Commands: `get_settings`, `set_nudges_paused`, `set_sound_enabled`, `set_sound_volume`,
+  `set_selection_summaries`, `set_mode`, `set_trigger_enabled`, `set_activity_enabled`.
+  Each setter rebroadcasts `frog-settings`.
+- `settings::intervention_cooldown()` feeds `ai_engine.rs`; `settings::detector_enabled()`
+  is what the detectors consult — Chill mutes `doomscroll` regardless of its toggle, while
+  the toggle keeps its own state so leaving Chill restores it.
+
+## Selection summaries (`src-tauri/src/selection.rs`)
+- Polls every 900 ms; needs ≥400 chars, stable for two ticks, 8000-char cap.
+- Cooldowns: 10 s between different offers, 120 s for the same passage. The watcher exits
+  early while the `selectionSummaries` setting is off.
+- Reads the **menu-bar-owning** app's own `AXFocusedUIElement` (the system-wide
+  `AXFocusedApplication` answers `-25204` for non-bundled processes, including the dev
+  binary). Chromium apps get `AXManualAccessibility` **and** `AXEnhancedUserInterface`
+  set **once per pid** — re-sending resets their tree and hands back an empty selection.
+- `AXSelectedText` strings are UTF-16-backed in Chromium, so they go through
+  `Display for CFString`; `as_str_unchecked` returns `None` there. `string_from`
+  checks `CFGetTypeID` first — the attribute is not guaranteed to be a `CFString`.
+- The per-pid cache clears whenever no focused element appears, so the Chromium flags
+  are retried after a late permission grant or an app restart. It does *not* re-send
+  while an element is focused (that wipes Chromium's selection).
+- The Accessibility hint re-emits every ~5 s until `AXIsProcessTrusted()` is true, because
+  a single emit at setup usually lands before the webview subscribes.
+- Payload is `{ text, words }` on `selection-ready`. The frontend asks first, then calls
+  `summarize_selection`, which sends the passage to Gemini (`SUMMARY_SYSTEM` prompt).
 
 ## Run
 ```
@@ -96,4 +134,6 @@ warning: `block v0.1.6` future-incompat). Port 1420 must be free; kill stray
 2. Decide whether to keep the env overrides in the shipped build (harmless; default off).
 3. Harden chat: consider a moderation pass on replies and a per-minute message cap on the
    command (currently unbounded besides input length).
-4. Final product smoke pass in a packaged build (`npm run tauri build`).
+4. Final product smoke pass in a packaged build (`npm run tauri build`) — the Accessibility
+   grant is tied to the dev binary, so selection detection needs re-granting there.
+5. Optional: mirror the mode pick in the tray menu (only pause/sound are there today).

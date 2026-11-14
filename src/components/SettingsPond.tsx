@@ -10,13 +10,16 @@ import {
   DEFAULT_SETTINGS,
   loadSettings,
   saveActivityEnabled,
+  saveMode,
   saveNudgesPaused,
+  saveSelectionSummaries,
   saveSoundEnabled,
   saveTriggerEnabled,
   saveVolume,
   watchSettings,
   type ActivityId,
   type FrogSettings,
+  type PondMode,
   type TriggerId,
 } from "../settings";
 
@@ -235,10 +238,13 @@ function StatRow({ label, value }: { label: string; value: string }) {
 
 function Toggle({
   label,
+  note,
   on,
   onChange,
 }: {
   label: string;
+  /** Shown under the label when the setting is overridden elsewhere. */
+  note?: string;
   on: boolean;
   onChange: () => void;
 }) {
@@ -250,7 +256,14 @@ function Toggle({
       onClick={onChange}
       className="flex w-full items-center justify-between border-b border-emerald-200/10 py-[3px] text-left"
     >
-      <span className="text-[13px] leading-none text-emerald-50/90">{label}</span>
+      <span className="min-w-0 pr-2">
+        <span className="block text-[13px] leading-none text-emerald-50/90">{label}</span>
+        {note && (
+          <span className="mt-0.5 block text-[10px] leading-none text-emerald-200/60">
+            {note}
+          </span>
+        )}
+      </span>
       <span
         aria-hidden
         className={`flex h-[14px] w-[26px] items-center border-2 border-[#04170f] px-[2px] ${
@@ -269,7 +282,6 @@ export function SettingsPond() {
   const [history, setHistory] = useState<{ stress: number; focus: number }[]>([]);
   const [view, setView] = useState<View>("status");
   const [running, setRunning] = useState<{ id: ActivityId; step: number } | null>(null);
-  const [mode, setMode] = useState<string | null>(null);
   const [start, setStart] = useState({ x: 300, y: 120 });
   const [jumpKey, setJumpKey] = useState(0);
 
@@ -441,6 +453,17 @@ export function SettingsPond() {
     void saveSoundEnabled(soundEnabled).catch(() => {});
   };
 
+  const setSummaries = () => {
+    const selectionSummaries = !settings.selectionSummaries;
+    setSettings((previous) => ({ ...previous, selectionSummaries }));
+    void saveSelectionSummaries(selectionSummaries).catch(() => {});
+  };
+
+  const pickMode = (mode: PondMode) => {
+    setSettings((previous) => ({ ...previous, mode }));
+    void saveMode(mode).catch(() => {});
+  };
+
   const changeVolume = (volume: number) => {
     setSettings((previous) => ({ ...previous, volume }));
     void saveVolume(volume).catch(() => {});
@@ -578,6 +601,11 @@ export function SettingsPond() {
             </p>
             <Toggle label="Croak sounds" on={settings.soundEnabled} onChange={setSound} />
             <Toggle label="Pause nudges" on={settings.nudgesPaused} onChange={setPaused} />
+            <Toggle
+              label="Summarize long selections"
+              on={settings.selectionSummaries}
+              onChange={setSummaries}
+            />
 
             <div className="mt-1.5">
               <div className="flex items-baseline justify-between text-[13px] uppercase">
@@ -604,6 +632,11 @@ export function SettingsPond() {
               <Toggle
                 key={row.id}
                 label={row.label}
+                note={
+                  row.id === "doomscroll" && settings.mode === "chill"
+                    ? "muted in chill mode"
+                    : undefined
+                }
                 on={settings.triggers[row.key]}
                 onChange={() => toggleTrigger(row.id, row.key)}
               />
@@ -686,15 +719,15 @@ export function SettingsPond() {
         {view === "modes" && (
           <div className="mt-1 flex-1 overflow-y-auto pr-1">
             <p className="text-[12px] leading-[1.15] text-emerald-100/60">
-              Modes are coming soon. Pick the vibe you want later.
+              Sets how often the frog interrupts and what he'll judge you for.
             </p>
             {MODES.map((item) => (
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setMode(item.id)}
+                onClick={() => pickMode(item.id)}
                 className={`mt-1.5 w-full border-2 border-[#04170f] px-2 py-1 text-left ${
-                  mode === item.id ? "bg-emerald-500/80" : "bg-emerald-800/60"
+                  settings.mode === item.id ? "bg-emerald-500/80" : "bg-emerald-800/60"
                 }`}
               >
                 <span className="block text-[15px] uppercase leading-none text-emerald-50">
