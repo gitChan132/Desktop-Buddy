@@ -62,7 +62,7 @@ export default function App() {
 
   useEffect(() => {
     const unlisten = listen<FrogInterventionPayload>(
-      "frog-intervention",
+      "trigger-intervention",
       (event) => setIntervention(event.payload),
     );
     return () => {

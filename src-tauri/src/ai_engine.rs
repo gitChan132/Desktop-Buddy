@@ -1,8 +1,9 @@
 //! Stress scoring, LLM prompt pipeline, and intervention event emission.
 
+use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 use crate::telemetry::{self, TypingSnapshot};
@@ -10,9 +11,24 @@ use crate::window_tracker::{self, WindowSnapshot};
 
 const EVALUATION_INTERVAL: Duration = Duration::from_secs(20);
 /// Don't nudge the user more often than this.
-const MIN_INTERVENTION_GAP: Duration = Duration::from_secs(75);
+const INTERVENTION_COOLDOWN: Duration = Duration::from_secs(5 * 60);
 
-const EVENT_NAME: &str = "frog-intervention";
+const EVENT_NAME: &str = "trigger-intervention";
+
+const GEMINI_ENDPOINT: &str = "https://generativelanguage.googleapis.com/v1beta/models";
+const DEFAULT_MODEL: &str = "gemini-2.5-flash";
+const LLM_TIMEOUT: Duration = Duration::from_secs(15);
+
+const SYSTEM_PROMPT: &str = "You are The Feeling Frog, an empathetic, cozy amphibian desktop companion. \
+The user is showing signs of burnout at their computer; you notice the pattern but never scold. \
+Speak gently and warmly, with occasional subtle frog charm (a soft *ribbit* now and then) — never annoying, \
+never nagging, never a lecture. Never use pet names or terms of endearment (no \"little friend\", \"dear\", \
+\"buddy\", \"my friend\", \"little one\"); address the user plainly and directly. You are given a `detected` \
+field describing exactly what gave them away; weave that detail into your message in a light, humorous way \
+(for example, \"forty backspaces?\") so the user can tell what you noticed. Reply with a single JSON object \
+matching the schema: \"message\" is one warm, grounding sentence (max 28 words) that playfully names the \
+detected detail and helps the user feel settled, and \"suggestedAction\" is the soothing micro-action that \
+fits it best.";
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -70,7 +86,10 @@ fn build_intervention(
     } else if typing.keys_in_window >= 180 {
         (
             "frantic_typing",
-            "*ribbit* Your keys are hopping faster than me. Let's slow the pond down for one breath.".to_string(),
+            format!(
+                "*ribbit* {} keystrokes in 30 seconds — your keys are hopping faster than me. Let's slow the pond down for one breath.",
+                typing.keys_in_window
+            ),
             "pond_stretch",
         )
     } else if windows.tab_thrashing {
@@ -102,56 +121,245 @@ fn build_intervention(
     })
 }
 
-/// LLM prompt pipeline.
-///
-/// Produces the JSON instructions for the model that rewrites `message`. When an
-/// endpoint/API key is configured, send this prompt and replace the message with
-/// the model's response; until then the deterministic copy is emitted directly.
-pub fn build_prompt(payload: &FrogInterventionPayload) -> String {
-    serde_json::json!({
-        "system": "You are Feeling Frog, a warm desktop companion. Write one short, gentle intervention (max 28 words) that helps the user recover from burnout. Be playful but never judgmental. End with a concrete micro-action.",
-        "response_format": {
-            "type": "json_object",
-            "schema": {
-                "message": "string",
-                "suggestedAction": "belly_breathe | lily_pad_step | pond_stretch"
-            }
-        },
-        "observation": {
-            "trigger": payload.trigger,
-            "severity": payload.severity,
-            "activeApp": payload.active_app,
-            "draftMessage": payload.message
-        }
-    })
-    .to_string()
+/// Human-readable version of what tripped the detector, fed to the model so it
+/// can call out the exact signal (e.g. "40 backspaces in 30 seconds").
+fn detection_detail(
+    trigger: &str,
+    typing: &TypingSnapshot,
+    windows: &WindowSnapshot,
+) -> String {
+    match trigger {
+        "backspace_loop" => format!(
+            "{} backspaces in the last 30 seconds",
+            typing.backspaces_in_window
+        ),
+        "frantic_typing" => format!(
+            "{} keystrokes in the last 30 seconds",
+            typing.keys_in_window
+        ),
+        "tab_thrashing" => format!(
+            "{} window switches in the last 20 seconds",
+            windows.switches_in_window
+        ),
+        "idle_freeze" => "6 minutes with no keyboard or mouse input".to_string(),
+        other => other.to_string(),
+    }
 }
 
-/// Starts the periodic evaluation loop that emits `frog-intervention` events.
+/// What the model is asked to return.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LlmReply {
+    message: String,
+    suggested_action: String,
+}
+
+fn cooldown() -> &'static Mutex<Option<Instant>> {
+    static COOLDOWN: Mutex<Option<Instant>> = Mutex::new(None);
+    &COOLDOWN
+}
+
+// Test hook (disabled): interval override for repeat-trigger testing.
+// fn intervention_cooldown() -> Duration {
+//     std::env::var("FROG_COOLDOWN_SECS")
+//         .ok()
+//         .and_then(|secs| secs.parse().ok())
+//         .map(Duration::from_secs)
+//         .unwrap_or(INTERVENTION_COOLDOWN)
+// }
+
+fn suggested_action_for(trigger: &str) -> &'static str {
+    match trigger {
+        "backspace_loop" => "belly_breathe",
+        "tab_thrashing" => "lily_pad_step",
+        _ => "pond_stretch",
+    }
+}
+
+/// Reads `GEMINI_API_KEY`, loading `.env.local` when the app was started without it.
+fn api_key() -> Option<String> {
+    if let Ok(key) = std::env::var("GEMINI_API_KEY") {
+        return Some(key);
+    }
+    for file in [".env.local", "../.env.local"] {
+        if dotenvy::from_filename(file).is_ok() {
+            if let Ok(key) = std::env::var("GEMINI_API_KEY") {
+                return Some(key);
+            }
+        }
+    }
+    None
+}
+
+/// Builds the Gemini request body: Feeling Frog persona, the observed trigger,
+/// and the active window title. The response is constrained to the payload JSON.
+fn build_llm_request(trigger: &str, window_title: &str, detected: &str) -> serde_json::Value {
+    let observation = serde_json::json!({
+        "trigger": trigger,
+        "activeWindowTitle": window_title,
+        "detected": detected,
+    });
+
+    serde_json::json!({
+        "system_instruction": { "parts": [{ "text": SYSTEM_PROMPT }] },
+        "contents": [{
+            "role": "user",
+            "parts": [{ "text": observation.to_string() }]
+        }],
+        "generationConfig": {
+            "temperature": 0.7,
+            "responseMimeType": "application/json",
+            "responseSchema": {
+                "type": "OBJECT",
+                "properties": {
+                    "message": { "type": "STRING" },
+                    "suggestedAction": {
+                        "type": "STRING",
+                        "enum": ["belly_breathe", "lily_pad_step", "pond_stretch"]
+                    }
+                },
+                "required": ["message", "suggestedAction"]
+            }
+        }
+    })
+}
+
+async fn ask_llm(trigger: &str, window_title: &str, detected: &str) -> Result<LlmReply, String> {
+    let key = api_key().ok_or("GEMINI_API_KEY not configured")?;
+    let model = std::env::var("GEMINI_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+    let url = format!("{GEMINI_ENDPOINT}/{model}:generateContent?key={key}");
+
+    // Test hook (disabled): LLM latency timing.
+    // let started = Instant::now();
+    let body: serde_json::Value = reqwest::Client::new()
+        .post(url)
+        .json(&build_llm_request(trigger, window_title, detected))
+        .timeout(LLM_TIMEOUT)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?
+        .error_for_status()
+        .map_err(|error| error.to_string())?
+        .json()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    let text = body["candidates"][0]["content"]["parts"][0]["text"]
+        .as_str()
+        .ok_or("model returned no text")?;
+
+    let reply = serde_json::from_str::<LlmReply>(text)
+        .map_err(|error| format!("invalid model JSON: {error}"))?;
+    // eprintln!("[ai_engine] LLM round-trip: {:.0?}", started.elapsed());
+    Ok(reply)
+}
+
+/// Fires a Feeling Frog intervention once telemetry crosses a burnout threshold.
+///
+/// Throttled to one nudge per five minutes. Sends only the trigger type and the
+/// active window title to the LLM; the deterministic copy is the fallback when
+/// the model or its API key is unavailable. Emits `trigger-intervention`.
+pub async fn trigger_frog_intervention(
+    app: AppHandle,
+    trigger: String,
+    window_title: String,
+    detected: String,
+    fallback_message: String,
+) -> Option<FrogInterventionPayload> {
+    {
+        let mut last = cooldown()
+            .lock()
+            .expect("intervention cooldown lock poisoned");
+        if last.is_some_and(|stamp| stamp.elapsed() < INTERVENTION_COOLDOWN) {
+            return None;
+        }
+        *last = Some(Instant::now());
+    }
+
+    let score = (telemetry::pond_stress() * 100.0).round() as u8;
+    let mut payload = FrogInterventionPayload {
+        id: next_id(),
+        trigger: trigger.clone(),
+        severity: severity_for(score).to_string(),
+        message: fallback_message,
+        suggested_action: suggested_action_for(&trigger).to_string(),
+        active_app: Some(window_title.clone()),
+    };
+
+    match ask_llm(&trigger, &window_title, &detected).await {
+        Ok(reply) => {
+            payload.message = reply.message;
+            payload.suggested_action = reply.suggested_action;
+        }
+        Err(error) => {
+            eprintln!("[ai_engine] intervention LLM unavailable, using fallback: {error}");
+        }
+    }
+
+    if let Err(error) = app.emit(EVENT_NAME, &payload) {
+        eprintln!("[ai_engine] could not emit intervention: {error}");
+        return None;
+    }
+
+    Some(payload)
+}
+
+/// Starts the periodic evaluation loop that emits `trigger-intervention` events.
 pub fn start(app: AppHandle) {
     std::thread::spawn(move || {
-        let mut last_intervention: Option<Instant> = None;
+        // Test hook (disabled): FROG_FORCE_TRIGGER=backspace_loop fired every tick.
+        // let forced = std::env::var("FROG_FORCE_TRIGGER").ok();
+        // if let Some(trigger) = forced.clone() {
+        //     std::thread::sleep(Duration::from_secs(12));
+        //     fire_forced(&app, &trigger);
+        // }
 
         loop {
             std::thread::sleep(EVALUATION_INTERVAL);
 
             let typing = telemetry::snapshot();
             let windows = window_tracker::snapshot();
-            let Some(payload) = build_intervention(&typing, &windows) else {
+            // eprintln!(
+            //     "[ai_engine] tick keys={} backspaces={} streak={} switches={} thrash={} idle={} stress={:.2}",
+            //     typing.keys_in_window,
+            //     typing.backspaces_in_window,
+            //     typing.backspace_streak,
+            //     windows.switches_in_window,
+            //     windows.tab_thrashing,
+            //     windows.idle_freeze,
+            //     windows.stress_score
+            // );
+
+            let Some(candidate) = build_intervention(&typing, &windows) else {
                 continue;
             };
 
-            let cooled_down = last_intervention
-                .is_none_or(|stamp| stamp.elapsed() >= MIN_INTERVENTION_GAP);
-            if !cooled_down {
-                continue;
-            }
+            let window_title = windows
+                .active_app
+                .as_ref()
+                .map(|app| app.title.clone())
+                .unwrap_or_default();
+            let detected = detection_detail(&candidate.trigger, &typing, &windows);
 
-            // Prompt is ready for the LLM; deterministic copy is the fallback.
-            let _prompt = build_prompt(&payload);
-            if app.emit(EVENT_NAME, payload).is_ok() {
-                last_intervention = Some(Instant::now());
-            }
+            tauri::async_runtime::block_on(trigger_frog_intervention(
+                app.clone(),
+                candidate.trigger,
+                window_title,
+                detected,
+                candidate.message,
+            ));
         }
     });
 }
+
+// Test hook (disabled): forced intervention helper.
+// fn fire_forced(app: &AppHandle, trigger: &str) -> bool {
+//     let fallback = format!("*ribbit* Dev trigger: {trigger}. Take one slow breath with me.");
+//     tauri::async_runtime::block_on(trigger_frog_intervention(
+//         app.clone(),
+//         trigger.to_string(),
+//         "Final Essay - Google Docs".to_string(),
+//         fallback,
+//     ))
+//     .is_some()
+// }
