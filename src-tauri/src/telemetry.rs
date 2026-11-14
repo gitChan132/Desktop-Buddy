@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use rdev::{listen, Event, EventType, Key};
+use rdev::{listen, Button, Event, EventType, Key};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
@@ -28,6 +28,9 @@ const CURSOR_THROTTLE: Duration = Duration::from_millis(50);
 const CURSOR_EVENT: &str = "cursor-pos";
 /// Event carrying the normalized pond ripple stress score.
 const STRESS_EVENT: &str = "pond-stress";
+/// Fired when the primary mouse button is released anywhere on the desktop, so
+/// the frog always lets go of a drag even if the cursor left its window.
+const RELEASE_EVENT: &str = "pointer-release";
 
 // Per-window values that saturate their component of the stress score.
 const MAX_KEYS_PER_WINDOW: f32 = 180.0; // 6 keys/s sustained
@@ -260,6 +263,9 @@ fn record(app: &AppHandle, event: Event) {
             if let Some(sample) = note_pointer(x, y, now) {
                 let _ = app.emit(CURSOR_EVENT, sample);
             }
+        }
+        EventType::ButtonRelease(Button::Left) => {
+            let _ = app.emit(RELEASE_EVENT, ());
         }
         _ => {}
     }

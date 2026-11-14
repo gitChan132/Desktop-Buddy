@@ -57,8 +57,12 @@ export default function App() {
   const [intervention, setIntervention] =
     useState<FrogInterventionPayload | null>(null);
   const [breathingOpen, setBreathingOpen] = useState(false);
+  const [carrying, setCarrying] = useState(false);
 
-  useClickThroughHitbox(breathingOpen);
+  // Keep the whole window interactive while he is being carried or the guide is
+  // up; otherwise the hitbox tick can make it click-through mid-drag and drop
+  // the pointer capture.
+  useClickThroughHitbox(breathingOpen || carrying);
 
   useEffect(() => {
     const unlisten = listen<FrogInterventionPayload>(
@@ -87,6 +91,7 @@ export default function App() {
         mood={mood}
         intervention={intervention}
         onGrounding={() => setBreathingOpen(true)}
+        onCarry={setCarrying}
       />
       <BreatheAlong open={breathingOpen} onClose={closeBreathing} />
     </div>

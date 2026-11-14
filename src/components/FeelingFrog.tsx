@@ -1,5 +1,6 @@
 import { PhysicalPosition } from "@tauri-apps/api/dpi";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
+import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
 import {
   AnimatePresence,
   motion,
@@ -50,7 +51,6 @@ const THROW_BOUNCE_X = 0.55;
 const THROW_BOUNCE_Y = 0.45;
 /** Clamp on release speed, and the speed at which he is considered parked. */
 const THROW_MAX_SPEED = 4200;
-const THROW_MIN_SPEED = 60;
 const THROW_SETTLE_SPEED = 40;
 /** Only pointer samples this recent (ms) contribute to release velocity. */
 const THROW_SAMPLE_WINDOW = 110;
@@ -63,6 +63,8 @@ interface FeelingFrogProps {
   mood: FrogMood;
   intervention: FrogInterventionPayload | null;
   onGrounding: () => void;
+  /** True while the frog is being carried, so the window stays interactive. */
+  onCarry: (carrying: boolean) => void;
 }
 
 const ACTION_LABEL: Record<FrogInterventionPayload["suggestedAction"], string> =
@@ -114,6 +116,7 @@ export function FeelingFrog({
   mood,
   intervention,
   onGrounding,
+  onCarry,
 }: FeelingFrogProps) {
   const hop = useAnimationControls();
   const lastId = useRef<string | null>(null);
@@ -127,9 +130,7 @@ export function FeelingFrog({
   const [flightPose, setFlightPose] = useState(0);
   const [tilt, setTilt] = useState(0);
 
-  // Pointer samples (physical px, DOM timestamp) used to work out how fast he
-  // was moving when released.
-  const samples = useRef<{ t: number; x: number; y: number }[]>([]);
+  // Animation frame id of the throw flight loop.
   const flightFrame = useRef<number | null>(null);
 
   const stopFlight = () => {
@@ -146,20 +147,23 @@ export function FeelingFrog({
 
   /** Throws the window along the sampled release velocity until it settles. */
   const throwFrog = async (recent: { t: number; x: number; y: number }[]) => {
-    if (recent.length < 2) return;
-
-    const first = recent[0];
-    const last = recent[recent.length - 1];
-    const seconds = (last.t - first.t) / 1000;
-    if (seconds <= 0) return;
-
-    let vx = (last.x - first.x) / seconds;
-    let vy = (last.y - first.y) / seconds;
-    const speed = Math.hypot(vx, vy);
-    if (speed < THROW_MIN_SPEED) return;
-    if (speed > THROW_MAX_SPEED) {
-      vx *= THROW_MAX_SPEED / speed;
-      vy *= THROW_MAX_SPEED / speed;
+    // A release with no recent motion is still a release: start from rest and
+    // let gravity drop him to the desktop.
+    let vx = 0;
+    let vy = 0;
+    if (recent.length >= 2) {
+      const first = recent[0];
+      const last = recent[recent.length - 1];
+      const seconds = (last.t - first.t) / 1000;
+      if (seconds > 0) {
+        vx = (last.x - first.x) / seconds;
+        vy = (last.y - first.y) / seconds;
+        const speed = Math.hypot(vx, vy);
+        if (speed > THROW_MAX_SPEED) {
+          vx *= THROW_MAX_SPEED / speed;
+          vy *= THROW_MAX_SPEED / speed;
+        }
+      }
     }
 
     const win = getCurrentWindow();
@@ -270,113 +274,150 @@ export function FeelingFrog({
     return () => clearTimeout(id);
   }, [flying, flightPose]);
 
-  // Drag state: window origin + pointer origin captured on press, so the
-  // window follows the cursor without drifting. Null when not dragging.
+  // Drag state. The crown offset is fixed for the gesture and the window is
+  // positioned from the live cursor every animation frame, rather than from
+  // pointer deltas: a fast flick cannot outrun the window and leave him behind.
   const drag = useRef<{
-    pointerX: number;
-    pointerY: number;
-    windowX: number;
-    windowY: number;
     /** Crown position in physical px, relative to the window's top-left. */
     crownX: number;
     crownY: number;
+    /** Cursor position at press, for the click/drag threshold. */
+    startX: number;
+    startY: number;
     scale: number;
     moved: boolean;
+    /** Recent cursor samples (physical px) for release velocity. */
+    samples: { t: number; x: number; y: number }[];
   } | null>(null);
+  const followFrame = useRef<number | null>(null);
+  const wasDragged = useRef(false);
+
+  // Watches the real cursor position from the moment of the press. Movement is
+  // detected here rather than from pointer events, so a fast flick that leaves
+  // the window before the first `pointermove` still picks him up.
+  const followCursor = async () => {
+    followFrame.current = null;
+    const state = drag.current;
+    if (!state) return;
+    try {
+      const cursor = await cursorPosition();
+      const now = performance.now();
+      state.samples.push({ t: now, x: cursor.x, y: cursor.y });
+      if (state.samples.length > 32) state.samples.shift();
+
+      if (
+        !state.moved &&
+        Math.hypot(cursor.x - state.startX, cursor.y - state.startY) >=
+          DRAG_THRESHOLD * state.scale
+      ) {
+        state.moved = true;
+        wasDragged.current = true;
+        setHeld(true);
+        onCarry(true);
+      }
+
+      if (state.moved) {
+        await getCurrentWindow().setPosition(
+          new PhysicalPosition(
+            Math.round(cursor.x - state.crownX),
+            Math.round(cursor.y - state.crownY),
+          ),
+        );
+      }
+    } catch {
+      // Window APIs unavailable (plain browser dev).
+    }
+    if (drag.current) {
+      followFrame.current = requestAnimationFrame(() => void followCursor());
+    }
+  };
+
+  const finishDrag = () => {
+    const state = drag.current;
+    if (!state) return;
+    drag.current = null;
+    if (followFrame.current !== null) {
+      cancelAnimationFrame(followFrame.current);
+      followFrame.current = null;
+    }
+    onCarry(false);
+    setHeld(false);
+    if (!state.moved) return; // A plain click is not a throw.
+
+    // Only the tail of the movement counts, so pausing before letting go drops
+    // him instead of flinging him.
+    const cutoff = performance.now() - THROW_SAMPLE_WINDOW;
+    void throwFrog(state.samples.filter((sample) => sample.t >= cutoff));
+  };
+
+  // The global left-button release ends a carry even when the cursor left the
+  // window, so he can never be left hanging in the air.
+  useEffect(() => {
+    const unlisten = listen("pointer-release", () => finishDrag());
+    return () => {
+      void unlisten.then((off) => off());
+    };
+    // finishDrag only reads refs and calls stable setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Cancel the follow loop if the component goes away mid-drag.
+  useEffect(
+    () => () => {
+      if (followFrame.current !== null) {
+        cancelAnimationFrame(followFrame.current);
+        followFrame.current = null;
+      }
+    },
+    [],
+  );
 
   const handlePointerDown = async (event: React.PointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return;
-    // Catch him out of the air.
+    // Capture the element now: `currentTarget` is cleared once the handler
+    // awaits, and the pointer never gets captured if this happens later.
+    const button = event.currentTarget;
+    // Catch him out of the air and clear any drag that never got a release.
     stopFlight();
+    finishDrag();
+    wasDragged.current = false;
     try {
-      const win = getCurrentWindow();
-      const rect = event.currentTarget.getBoundingClientRect();
-      const [position, scale] = await Promise.all([
-        win.outerPosition(),
-        win.scaleFactor(),
-      ]);
+      const rect = button.getBoundingClientRect();
+      const scale = await getCurrentWindow().scaleFactor();
       drag.current = {
-        pointerX: event.screenX * scale,
-        pointerY: event.screenY * scale,
-        windowX: position.x,
-        windowY: position.y,
         crownX: (rect.left + rect.width * CROWN_X) * scale,
         crownY: (rect.top + rect.height * CROWN_Y) * scale,
+        startX: event.screenX * scale,
+        startY: event.screenY * scale,
         scale,
         moved: false,
+        samples: [
+          {
+            t: performance.now(),
+            x: event.screenX * scale,
+            y: event.screenY * scale,
+          },
+        ],
       };
-      samples.current = [
-        { t: event.timeStamp, x: event.screenX * scale, y: event.screenY * scale },
-      ];
-      event.currentTarget.setPointerCapture(event.pointerId);
+      button.setPointerCapture(event.pointerId);
+      void followCursor();
     } catch {
       // Window APIs unavailable (plain browser dev): leave dragging disabled.
     }
   };
 
-  const handlePointerMove = (event: React.PointerEvent<HTMLButtonElement>) => {
-    const state = drag.current;
-    if (!state) return;
-
-    const pointerX = event.screenX * state.scale;
-    const pointerY = event.screenY * state.scale;
-
-    samples.current.push({ t: event.timeStamp, x: pointerX, y: pointerY });
-    if (samples.current.length > 32) samples.current.shift();
-
-    if (!state.moved) {
-      const dx = pointerX - state.pointerX;
-      const dy = pointerY - state.pointerY;
-      if (Math.hypot(dx, dy) < DRAG_THRESHOLD * state.scale) return;
-
-      // First real movement: shift the window so the crown lands under the
-      // cursor, then drag from there. Grabbing him anywhere picks him up by
-      // the forehead instead of letting him hang off the grab point.
-      state.moved = true;
-      setHeld(true);
-      state.windowX = Math.round(pointerX - state.crownX);
-      state.windowY = Math.round(pointerY - state.crownY);
-      state.pointerX = pointerX;
-      state.pointerY = pointerY;
-      void getCurrentWindow()
-        .setPosition(
-          new PhysicalPosition(Math.round(state.windowX), Math.round(state.windowY)),
-        )
-        .catch(() => {});
-      return;
-    }
-
-    void getCurrentWindow()
-      .setPosition(
-        new PhysicalPosition(
-          Math.round(state.windowX + (pointerX - state.pointerX)),
-          Math.round(state.windowY + (pointerY - state.pointerY)),
-        ),
-      )
-      .catch(() => {});
-  };
-
   const endDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
-    const state = drag.current;
-    if (state && event.currentTarget.hasPointerCapture(event.pointerId)) {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    setHeld(false);
-    if (!state?.moved) return; // A plain click is not a throw.
-
-    // Only the tail of the movement counts: if he was held still before being
-    // released, he simply drops instead of flying off.
-    const cutoff = event.timeStamp - THROW_SAMPLE_WINDOW;
-    const recent = samples.current.filter((sample) => sample.t >= cutoff);
-    samples.current = [];
-    void throwFrog(recent);
+    finishDrag();
   };
 
   const handleClick = () => {
-    const wasDragged = drag.current?.moved ?? false;
-    drag.current = null;
-    setHeld(false);
-    if (wasDragged) return; // A drag must not trigger the croak-along.
+    const dragged = wasDragged.current;
+    wasDragged.current = false;
+    finishDrag();
+    if (dragged) return; // A drag must not trigger the croak-along.
     onGrounding();
   };
 
@@ -445,7 +486,6 @@ export function FeelingFrog({
         aria-label="Drag to reposition the frog, click to croak along"
         onClick={handleClick}
         onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
         animate={hop}
