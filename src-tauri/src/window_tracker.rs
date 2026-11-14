@@ -14,6 +14,8 @@ use crate::telemetry;
 const POLL_INTERVAL: Duration = Duration::from_millis(2000);
 /// Window used to count window/title switches.
 const SWITCH_WINDOW: Duration = Duration::from_secs(20);
+/// Window used to count title changes inside the same app (short-form flips).
+const FLIP_WINDOW: Duration = Duration::from_secs(30);
 /// More than this many switches inside [`SWITCH_WINDOW`] is tab thrashing.
 const THRASH_SWITCHES: usize = 8;
 /// Zero keyboard/mouse input this long while a focus app is active is an idle freeze.
@@ -80,6 +82,89 @@ const FEED_APPS: &[&str] = &["tiktok", "instagram"];
 /// it has no desktop app; "shorts"/"reels" catch the short-form feeds.
 const FEED_TITLE_HINTS: &[&str] = &["instagram", "youtube", "tiktok", "shorts", "reels"];
 
+/// Site names we can recognise inside a browser tab title, most specific first.
+/// Browsers never give us the URL, so this is a best-effort identity.
+const KNOWN_SITES: &[&str] = &[
+    "youtube",
+    "instagram",
+    "tiktok",
+    "reddit",
+    "twitter",
+    "x.com",
+    "facebook",
+    "github",
+    "gitlab",
+    "gmail",
+    "notion",
+    "slack",
+    "discord",
+    "chatgpt",
+    "claude",
+    "linkedin",
+    "netflix",
+    "twitch",
+    "spotify",
+    "figma",
+    "wikipedia",
+    "medium",
+    "substack",
+    "stack overflow",
+    "amazon",
+    "trello",
+    "jira",
+    "outlook",
+    "google",
+];
+
+/// Browser suffixes that are not part of the page title.
+const BROWSER_SUFFIXES: &[&str] = &[
+    " - google chrome",
+    " - personal - microsoft edge",
+    " - microsoft edge",
+    " - mozilla firefox",
+    " - brave",
+    " - opera",
+    " - vivaldi",
+    " - chromium",
+    " - safari",
+];
+
+/// Best-effort identity for the *site* in front, so tab-thrashing only counts
+/// real website changes. Browsers do not expose the URL, so for them we strip
+/// the browser suffix, prefer a recognised site name, and otherwise fall back to
+/// the last " - " segment of the title. Non-browser apps are identified by their
+/// app name (two files in one editor are not a site change).
+fn site_key(app_name: &str, title: &str) -> String {
+    let app = app_name.to_lowercase();
+    if !BROWSERS.iter().any(|needle| app.contains(needle)) {
+        return app;
+    }
+
+    let mut cleaned = title.to_lowercase();
+    for suffix in BROWSER_SUFFIXES {
+        if let Some(stripped) = cleaned.strip_suffix(suffix) {
+            cleaned = stripped.to_string();
+            break;
+        }
+    }
+    let cleaned = cleaned.trim();
+    if cleaned.is_empty() {
+        return app;
+    }
+
+    let last = cleaned.rsplit(" - ").next().unwrap_or(cleaned).trim();
+    if let Some(site) = KNOWN_SITES
+        .iter()
+        .find(|site| !site.is_empty() && last.contains(*site))
+    {
+        return (*site).to_string();
+    }
+    if let Some(site) = KNOWN_SITES.iter().find(|site| cleaned.contains(*site)) {
+        return (*site).to_string();
+    }
+    last.to_string()
+}
+
 /// True when the foreground window looks like a social feed: either a dedicated
 /// feed app, or a browser showing a feed tab. Only the title is matched, never
 /// page contents.
@@ -101,6 +186,9 @@ pub struct ActiveApp {
 struct TrackerState {
     current: Option<ActiveApp>,
     switches: VecDeque<Instant>,
+    /// Title changes inside the same app: page navigation, or flipping through
+    /// short-form videos, which retitles the tab on every swipe.
+    title_changes: VecDeque<Instant>,
     /// When the current uninterrupted run on a feed window began.
     feed_since: Option<Instant>,
 }
@@ -120,6 +208,9 @@ pub struct WindowSnapshot {
     pub mean_hesitation_secs: f32,
     /// Significant back-and-forth cursor reversals in the last 10 seconds.
     pub direction_reversals: usize,
+    /// Title changes inside the same app in the last 30 seconds (short-form
+    /// flips: every swipe retitles the tab).
+    pub content_flips: usize,
     /// Detected: the foreground window looks like a social feed.
     pub on_feed: bool,
     /// Seconds the same feed window has been in front (0 when not on a feed).
@@ -133,13 +224,17 @@ fn tracker() -> &'static Mutex<TrackerState> {
     TRACKER.get_or_init(|| Mutex::new(TrackerState::default()))
 }
 
-fn prune(queue: &mut VecDeque<Instant>, now: Instant) {
+fn prune_with(queue: &mut VecDeque<Instant>, now: Instant, window: Duration) {
     while queue
         .front()
-        .is_some_and(|stamp| now.duration_since(*stamp) > SWITCH_WINDOW)
+        .is_some_and(|stamp| now.duration_since(*stamp) > window)
     {
         queue.pop_front();
     }
+}
+
+fn prune(queue: &mut VecDeque<Instant>, now: Instant) {
+    prune_with(queue, now, SWITCH_WINDOW);
 }
 
 fn is_focus_app(app_name: &str) -> bool {
@@ -147,6 +242,25 @@ fn is_focus_app(app_name: &str) -> bool {
     FOCUS_APPS
         .iter()
         .any(|needle| app_name.contains(needle))
+}
+
+fn note_window_change(state: &mut TrackerState, next: ActiveApp, now: Instant) {
+    if state.current.as_ref() == Some(&next) {
+        return;
+    }
+    if let Some(previous) = &state.current {
+        // Tab-thrashing counts *site* changes, so tab-hopping inside YouTube or
+        // Instagram does not register as a switch. Title changes within the same
+        // site are content flips (used by the short-form detector).
+        if site_key(&previous.app_name, &previous.title)
+            != site_key(&next.app_name, &next.title)
+        {
+            state.switches.push_back(now);
+        } else if previous.title != next.title {
+            state.title_changes.push_back(now);
+        }
+    }
+    state.current = Some(next);
 }
 
 fn poll_once() {
@@ -159,14 +273,9 @@ fn poll_once() {
     };
     let now = Instant::now();
     let mut state = tracker().lock().expect("window tracker lock poisoned");
+    note_window_change(&mut state, next, now);
     prune(&mut state.switches, now);
-    // Only count transitions between distinct app/window pairs, not repeated polls.
-    if state.current.as_ref() != Some(&next) {
-        if state.current.is_some() {
-            state.switches.push_back(now);
-        }
-        state.current = Some(next);
-    }
+    prune_with(&mut state.title_changes, now, FLIP_WINDOW);
 
     // The feed clock survives title changes on the same feed, and resets the
     // moment focus lands anywhere else.
@@ -196,9 +305,10 @@ pub fn snapshot() -> WindowSnapshot {
     let direction_reversals = telemetry::direction_reversals();
 
     let now = Instant::now();
-    let (active_app, switches_in_window, tab_thrashing, on_feed, feed_seconds) = {
+    let (active_app, switches_in_window, tab_thrashing, content_flips, on_feed, feed_seconds) = {
         let mut state = tracker().lock().expect("window tracker lock poisoned");
         prune(&mut state.switches, now);
+        prune_with(&mut state.title_changes, now, FLIP_WINDOW);
         let on_feed = state
             .current
             .as_ref()
@@ -215,6 +325,7 @@ pub fn snapshot() -> WindowSnapshot {
             state.current.clone(),
             state.switches.len(),
             state.switches.len() > THRASH_SWITCHES,
+            state.title_changes.len(),
             on_feed,
             feed_seconds,
         )
@@ -233,6 +344,7 @@ pub fn snapshot() -> WindowSnapshot {
         hesitant_clicks: hesitation.hesitant_clicks,
         mean_hesitation_secs: hesitation.mean_hesitation_secs,
         direction_reversals,
+        content_flips,
         on_feed,
         feed_seconds,
         stress_score,
@@ -287,5 +399,116 @@ mod tests {
         assert!(!is_feed_window("Google Chrome", "Reddit - Dive into anything"));
         assert!(!is_feed_window("Google Chrome", "Home / X"));
         assert!(!is_feed_window("", ""));
+    }
+
+    #[test]
+    fn site_key_keeps_tabs_within_one_website_together() {
+        assert_eq!(site_key("Google Chrome", "Cat video - YouTube"), "youtube");
+        assert_eq!(
+            site_key("Google Chrome", "Cat video - YouTube"),
+            site_key("Google Chrome", "Another video - YouTube")
+        );
+        assert_eq!(site_key("Google Chrome", "Instagram"), "instagram");
+        assert_eq!(
+            site_key("Microsoft Edge", "Cat video - YouTube - Personal - Microsoft Edge"),
+            "youtube"
+        );
+        assert_eq!(
+            site_key("Google Chrome", "Reddit - Dive into anything"),
+            "reddit"
+        );
+        assert_ne!(
+            site_key("Google Chrome", "Cat video - YouTube"),
+            site_key("Google Chrome", "Reddit - Dive into anything")
+        );
+        // Non-browser apps are their own site.
+        assert_eq!(
+            site_key("Visual Studio Code", "main.ts - Desktop-Buddy"),
+            "visual studio code"
+        );
+    }
+
+    #[test]
+    fn app_switch_and_title_flip_are_classified_apart() {
+        let now = Instant::now();
+        let mut state = TrackerState::default();
+
+        note_window_change(
+            &mut state,
+            ActiveApp {
+                app_name: "Google Chrome".to_string(),
+                title: "Some short - YouTube".to_string(),
+            },
+            now,
+        );
+        // Same app, new short: a content flip, not a window switch.
+        for i in 0..3 {
+            note_window_change(
+                &mut state,
+                ActiveApp {
+                    app_name: "Google Chrome".to_string(),
+                    title: format!("short {i} - YouTube"),
+                },
+                now,
+            );
+        }
+        assert_eq!(state.switches.len(), 0);
+        assert_eq!(state.title_changes.len(), 3);
+
+        // Another YouTube tab is still the same website: no switch.
+        note_window_change(
+            &mut state,
+            ActiveApp {
+                app_name: "Google Chrome".to_string(),
+                title: "Different tab - YouTube".to_string(),
+            },
+            now,
+        );
+        assert_eq!(state.switches.len(), 0);
+
+        // Chrome on Reddit *is* a different site.
+        note_window_change(
+            &mut state,
+            ActiveApp {
+                app_name: "Google Chrome".to_string(),
+                title: "Reddit - Dive into anything".to_string(),
+            },
+            now,
+        );
+        assert_eq!(state.switches.len(), 1);
+
+        // A different app is a switch too.
+        note_window_change(
+            &mut state,
+            ActiveApp {
+                app_name: "Visual Studio Code".to_string(),
+                title: "main.ts - Desktop-Buddy".to_string(),
+            },
+            now,
+        );
+        assert_eq!(state.switches.len(), 2);
+        assert_eq!(state.title_changes.len(), 4);
+
+        // Re-polling the same window changes nothing.
+        note_window_change(
+            &mut state,
+            ActiveApp {
+                app_name: "Visual Studio Code".to_string(),
+                title: "main.ts - Desktop-Buddy".to_string(),
+            },
+            now,
+        );
+        assert_eq!(state.switches.len(), 2);
+    }
+
+    #[test]
+    fn thrash_threshold_is_strictly_greater_than_eight() {
+        let now = Instant::now();
+        let mut switches: VecDeque<Instant> =
+            (0..THRASH_SWITCHES).map(|_| now - Duration::from_secs(1)).collect();
+        prune(&mut switches, now);
+        assert!(switches.len() <= THRASH_SWITCHES, "at threshold must not thrash");
+        switches.push_back(now);
+        assert!(switches.len() > THRASH_SWITCHES, "above threshold must thrash");
     }
 }

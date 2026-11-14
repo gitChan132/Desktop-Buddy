@@ -9,7 +9,7 @@ use tauri::{AppHandle, Emitter};
 use crate::telemetry::{self, ScrollSnapshot, TypingSnapshot};
 use crate::window_tracker::{self, WindowSnapshot};
 
-const EVALUATION_INTERVAL: Duration = Duration::from_secs(20);
+const EVALUATION_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Evaluation cadence; `FROG_EVAL_SECS` overrides it for fast e2e tests.
 fn evaluation_interval() -> Duration {
@@ -26,14 +26,26 @@ const INTERVENTION_COOLDOWN: Duration = Duration::from_secs(5 * 60);
 /// 90 seconds. Both have env overrides for fast e2e checks.
 const DOOMSCROLL_SECONDS: u64 = 4 * 60;
 const DOOMSCROLL_SCROLLS: usize = 40;
+/// Short-form video (YouTube Shorts) moves much faster: half a minute of
+/// swiping is enough, with far fewer notches.
+const SHORTS_SECONDS: u64 = 30;
+const SHORTS_SCROLLS: usize = 6;
 /// Any more typing than this means they are working, not scrolling.
 const DOOMSCROLL_MAX_KEYS: usize = 10;
 
-fn doomscroll_seconds() -> u64 {
-    std::env::var("FROG_DOOMSCROLL_SECS")
+fn env_secs(name: &str, fallback: u64) -> u64 {
+    std::env::var(name)
         .ok()
         .and_then(|secs| secs.parse().ok())
-        .unwrap_or(DOOMSCROLL_SECONDS)
+        .unwrap_or(fallback)
+}
+
+fn doomscroll_seconds() -> u64 {
+    env_secs("FROG_DOOMSCROLL_SECS", DOOMSCROLL_SECONDS)
+}
+
+fn shorts_seconds() -> u64 {
+    env_secs("FROG_SHORTS_SECS", SHORTS_SECONDS)
 }
 
 fn doomscroll_scrolls() -> usize {
@@ -46,6 +58,30 @@ fn doomscroll_scrolls() -> usize {
 /// Back-and-forth cursor reversals needed within the oscillation window before
 /// it counts as stress. Set high — ordinary cursor moves flip direction often.
 const OSCILLATION_MIN_REVERSALS: usize = 14;
+
+fn shorts_scrolls() -> usize {
+    std::env::var("FROG_SHORTS_SCROLLS")
+        .ok()
+        .and_then(|count| count.parse().ok())
+        .unwrap_or(SHORTS_SCROLLS)
+}
+
+/// True when the feed is short-form video (YouTube Shorts or anything with
+/// "shorts" in the title) and the user is flipping through it fast enough to
+/// qualify for the 30-second rule. Flips count as well as wheel notches:
+/// every new short retitles the tab, and touchpad/trackpoint scrolling often
+/// never reaches the wheel hook.
+fn is_short_form_scroll(windows: &WindowSnapshot, scrolls: &ScrollSnapshot) -> bool {
+    let short_form_app = windows.active_app.as_ref().is_some_and(|app| {
+        let title = app.title.to_lowercase();
+        title.contains("youtube") || title.contains("shorts")
+    });
+    windows.on_feed
+        && short_form_app
+        && windows.feed_seconds >= shorts_seconds()
+        && (scrolls.scrolls_in_30s >= shorts_scrolls()
+            || windows.content_flips >= shorts_scrolls())
+}
 
 const EVENT_NAME: &str = "trigger-intervention";
 
@@ -107,7 +143,24 @@ fn build_intervention(
     let score = (windows.stress_score * 100.0).round() as u8;
     let active_app = windows.active_app.as_ref().map(|app| app.app_name.clone());
 
-    let (trigger, message, suggested_action) = if typing.backspaces_in_window >= 24
+    // Short-form video earns the fast 30-second rule; everything else uses the
+    // four-minute doomscroll gate.
+    let short_form = is_short_form_scroll(windows, scrolls);
+
+    let (trigger, message, suggested_action) = if short_form
+        && typing.keys_in_window < DOOMSCROLL_MAX_KEYS
+    {
+        // Checked first: flipping Shorts looks like cursor thrashing to the
+        // other detectors, and this is the more specific signal.
+        let flips = windows.content_flips.max(scrolls.scrolls_in_30s);
+        (
+            "doomscroll",
+            format!(
+                "*ribbit* {flips} flips in half a minute of Shorts. That is not rest, that is a slot machine. Close the tab and let your eyes land on something real."
+            ),
+            "pond_stretch",
+        )
+    } else if typing.backspaces_in_window >= 24
         || typing.backspace_streak >= 6
     {
         (
@@ -144,6 +197,20 @@ fn build_intervention(
                 windows.direction_reversals
             ),
             "pond_stretch",
+        ) 
+    } else if windows.on_feed
+        && typing.keys_in_window < DOOMSCROLL_MAX_KEYS
+        && windows.feed_seconds >= doomscroll_seconds()
+        && scrolls.scrolls_in_window >= doomscroll_scrolls()
+    {
+        let minutes = (windows.feed_seconds / 60).max(1);
+        (
+            "doomscroll",
+            format!(
+                "*ribbit* {minutes} minutes of feed, {} scrolls, and not one word typed. That app is not a lily pad. Put it down and let your eyes rest on something that isn't glowing. I'm not asking twice.",
+                scrolls.scrolls_in_window
+            ),
+            "pond_stretch",
         )
     } else if windows.tab_thrashing {
         (
@@ -153,20 +220,6 @@ fn build_intervention(
                 windows.switches_in_window
             ),
             "lily_pad_step",
-        )
-    } else if windows.on_feed
-        && windows.feed_seconds >= doomscroll_seconds()
-        && scrolls.scrolls_in_window >= doomscroll_scrolls()
-        && typing.keys_in_window < DOOMSCROLL_MAX_KEYS
-    {
-        let minutes = (windows.feed_seconds / 60).max(1);
-        (
-            "doomscroll",
-            format!(
-                "*ribbit* {minutes} minutes of feed, {} scrolls, and not one word typed. That app is not a lily pad. Put it down and let your eyes rest on something that isn't glowing — I'm not asking twice.",
-                scrolls.scrolls_in_window
-            ),
-            "pond_stretch",
         )
     } else if windows.idle_freeze {
         (
@@ -217,16 +270,25 @@ fn detection_detail(
             "{} window switches in the last 20 seconds",
             windows.switches_in_window
         ),
-        "doomscroll" => format!(
-            "{} minutes on {} with {} scrolls in the last 90 seconds and no typing",
-            windows.feed_seconds / 60,
-            windows
+        "doomscroll" => {
+            let app = windows
                 .active_app
                 .as_ref()
                 .map(|app| app.app_name.clone())
-                .unwrap_or_else(|| "a feed".to_string()),
-            scrolls.scrolls_in_window,
-        ),
+                .unwrap_or_else(|| "a feed".to_string());
+            if is_short_form_scroll(windows, scrolls) {
+                format!(
+                    "{} flips in the last 30 seconds of short-form video on {app}",
+                    windows.content_flips.max(scrolls.scrolls_in_30s)
+                )
+            } else {
+                format!(
+                    "{} minutes on {app} with {} scrolls in the last 90 seconds and no typing",
+                    windows.feed_seconds / 60,
+                    scrolls.scrolls_in_window
+                )
+            }
+        }
         "idle_freeze" => "2.5 minutes with no keyboard or mouse input".to_string(),
         other => other.to_string(),
     }
@@ -421,7 +483,7 @@ pub fn start(app: AppHandle) {
             let windows = window_tracker::snapshot();
             let scrolls = telemetry::scroll_snapshot();
             eprintln!(
-                "[ai_engine] tick keys={} backspaces={} streak={} switches={} thrash={} idle={} hesit={} rev={} feed={}({}s) scrolls={} stress={:.2}",
+                "[ai_engine] tick keys={} backspaces={} streak={} switches={} thrash={} idle={} hesit={} rev={} feed={}({}s) flips={} scrolls30={} scrolls90={} stress={:.2}",
                 typing.keys_in_window,
                 typing.backspaces_in_window,
                 typing.backspace_streak,
@@ -432,6 +494,8 @@ pub fn start(app: AppHandle) {
                 windows.direction_reversals,
                 windows.on_feed,
                 windows.feed_seconds,
+                windows.content_flips,
+                scrolls.scrolls_in_30s,
                 scrolls.scrolls_in_window,
                 windows.stress_score
             );
@@ -638,6 +702,7 @@ mod tests {
         };
         let scrolls = ScrollSnapshot {
             scrolls_in_window: DOOMSCROLL_SCROLLS,
+            scrolls_in_30s: 0,
         };
         let payload = build_intervention(
             &TypingSnapshot::default(),
@@ -648,6 +713,79 @@ mod tests {
         assert_eq!(payload.trigger, "doomscroll");
         assert_eq!(payload.suggested_action, "pond_stretch");
         assert!(payload.message.contains("scrolls"));
+    }
+
+    #[test]
+    fn shorts_trigger_after_thirty_seconds_of_swiping() {
+        let windows = WindowSnapshot {
+            on_feed: true,
+            feed_seconds: SHORTS_SECONDS,
+            active_app: Some(crate::window_tracker::ActiveApp {
+                app_name: "Google Chrome".to_string(),
+                title: "Funny cat - YouTube".to_string(),
+            }),
+            ..Default::default()
+        };
+        let scrolls = ScrollSnapshot {
+            scrolls_in_window: SHORTS_SCROLLS,
+            scrolls_in_30s: SHORTS_SCROLLS,
+        };
+        let payload =
+            build_intervention(&TypingSnapshot::default(), &windows, &scrolls).unwrap();
+        assert_eq!(payload.trigger, "doomscroll");
+        assert!(payload.message.contains("Shorts"));
+    }
+
+    #[test]
+    fn shorts_trigger_from_title_flips_without_any_wheel_events() {
+        let windows = WindowSnapshot {
+            on_feed: true,
+            feed_seconds: SHORTS_SECONDS,
+            content_flips: SHORTS_SCROLLS,
+            active_app: Some(crate::window_tracker::ActiveApp {
+                app_name: "Microsoft Edge".to_string(),
+                title: "Some short - YouTube".to_string(),
+            }),
+            ..Default::default()
+        };
+        let no_wheel = ScrollSnapshot::default();
+        let payload =
+            build_intervention(&TypingSnapshot::default(), &windows, &no_wheel).unwrap();
+        assert_eq!(payload.trigger, "doomscroll");
+        assert!(payload.message.contains("Shorts"));
+    }
+
+    #[test]
+    fn shorts_rule_needs_fast_swipes_and_a_short_form_window() {
+        let fast = ScrollSnapshot {
+            scrolls_in_window: SHORTS_SCROLLS,
+            scrolls_in_30s: SHORTS_SCROLLS,
+        };
+        let slow = ScrollSnapshot {
+            scrolls_in_window: SHORTS_SCROLLS - 1,
+            scrolls_in_30s: SHORTS_SCROLLS - 1,
+        };
+        let youtube = WindowSnapshot {
+            on_feed: true,
+            feed_seconds: SHORTS_SECONDS,
+            active_app: Some(crate::window_tracker::ActiveApp {
+                app_name: "Google Chrome".to_string(),
+                title: "Funny cat - YouTube".to_string(),
+            }),
+            ..Default::default()
+        };
+        // A few swipes over half a minute is browsing, not Shorts doomscrolling.
+        assert!(build_intervention(&TypingSnapshot::default(), &youtube, &slow).is_none());
+
+        // The same cadence on TikTok keeps the four-minute rule.
+        let tiktok = WindowSnapshot {
+            active_app: Some(crate::window_tracker::ActiveApp {
+                app_name: "TikTok".to_string(),
+                title: "For You".to_string(),
+            }),
+            ..youtube.clone()
+        };
+        assert!(build_intervention(&TypingSnapshot::default(), &tiktok, &fast).is_none());
     }
 
     #[test]

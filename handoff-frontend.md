@@ -208,8 +208,20 @@ optional `activeApp`. All actions currently open the same breathing guide.
   `scrolls_90s >= 40`, `keys_30s < 10`. It is checked after the other triggers.
   The LLM prompt gets a sterner clause for this trigger ("playfully stern and
   disappointed"); the deterministic fallback is written the same way.
-- Demo/test overrides: `FROG_DOOMSCROLL_SECS`, `FROG_DOOMSCROLL_SCROLLS`
-  (alongside `FROG_EVAL_SECS`).
+- **Shorts fast lane:** on a YouTube window (title contains `youtube`/`shorts`)
+  with short-form cadence — `feed_seconds >= 30` and either `scrolls_30s >= 6`
+  or `content_flips >= 6` — the same trigger fires after half a minute instead
+  of four. Flips matter because precision-touchpad scrolls often never reach the
+  wheel hook, while every new short retitles the tab. The check runs before
+  cursor-oscillation and tab-thrashing so those can't steal it.
+- **Tab thrashing is site-based:** `site_key()` infers a website from the tab
+  title (browser suffix stripped, known site names matched, else the last ` - `
+  segment). Switching between YouTube tabs, or Instagram tabs, is a *content
+  flip*, not a window switch; only moving between different sites counts.
+- Evaluation runs every 10 s, so the Shorts rule lands roughly 30–40 s after the
+  window takes focus. The 5-minute intervention cooldown still applies.
+- Demo/test overrides: `FROG_DOOMSCROLL_SECS`, `FROG_DOOMSCROLL_SCROLLS`,
+  `FROG_SHORTS_SECS`, `FROG_SHORTS_SCROLLS` (alongside `FROG_EVAL_SECS`).
 - Frontend: `App` maps `trigger === "doomscroll"` to the `grumpy` mood;
   `FeelingFrog` shows shock frame 1 (wide-eyed glare) with the `.pixel-shake`
   CSS animation.

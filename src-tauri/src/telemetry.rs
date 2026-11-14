@@ -155,6 +155,8 @@ struct ScrollTelemetry {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ScrollSnapshot {
     pub scrolls_in_window: usize,
+    /// Same events, narrowed to the last 30 seconds (short-form detection).
+    pub scrolls_in_30s: usize,
 }
 
 fn scroll() -> &'static Mutex<ScrollTelemetry> {
@@ -185,6 +187,11 @@ pub fn scroll_snapshot() -> ScrollSnapshot {
     prune_scrolls(&mut state, now);
     ScrollSnapshot {
         scrolls_in_window: state.events.len(),
+        scrolls_in_30s: state
+            .events
+            .iter()
+            .filter(|stamp| now.duration_since(**stamp) <= Duration::from_secs(30))
+            .count(),
     }
 }
 
