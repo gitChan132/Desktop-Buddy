@@ -47,13 +47,13 @@
         "width": 760,
         "height": 540,
         "resizable": false,
-        "decorations": false,
-        "transparent": true,
-        "shadow": false,
-        "skipTaskbar": true,
+        "decorations": true,
+        "transparent": false,
+        "shadow": true,
+        "skipTaskbar": false,
         "visible": false,
         "focus": true,
-        "backgroundColor": "#00000000",
+        "backgroundColor": "#0b3a1f",
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding"
       }
     ],

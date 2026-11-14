@@ -374,7 +374,6 @@ fn open_pond(app: AppHandle) {
     };
     set_main_visible(&app, false);
     position_pond_center(&pond);
-    let _ = pond.set_always_on_top(true);
     let _ = pond.show();
     let _ = pond.set_focus();
     let _ = app.emit(PANEL_OPENED_EVENT, ());
@@ -384,7 +383,6 @@ fn open_pond(app: AppHandle) {
 #[tauri::command]
 fn hide_pond(app: AppHandle) {
     if let Some(pond) = app.get_webview_window(POND_LABEL) {
-        let _ = pond.set_always_on_top(false);
         let _ = pond.hide();
     }
     set_main_visible(&app, true);
@@ -446,6 +444,17 @@ pub fn run() {
                 #[cfg(target_os = "macos")]
                 float_over_fullscreen_spaces(&pond)?;
                 pond.hide()?;
+                // A normal decorated window: the title-bar X should hide the
+                // pond and bring the frog back, not destroy the webview.
+                let pond_handle = app.handle().clone();
+                let pond_window = pond.clone();
+                pond.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = pond_window.hide();
+                        set_main_visible(&pond_handle, true);
+                    }
+                });
             }
             // Dev/demo hooks: open the small popover or the big pond at launch.
             if std::env::var("FROG_OPEN_PANEL").is_ok() {

@@ -151,28 +151,6 @@
     box-shadow: inset 0 0 0 1px rgb(168 230 161 / 0.18);
   }
 
-  /* Menu buttons that sit on the lilypads. */
-  .pond-button {
-    border-radius: 0;
-    border: 3px solid #04170f;
-    background: rgb(24 92 50 / 0.94);
-    color: #e9fbe2;
-    box-shadow:
-      inset 0 0 0 1px rgb(168 230 161 / 0.35),
-      4px 4px 0 rgb(2 14 9 / 0.4);
-    transition: transform 80ms steps(2), background-color 80ms;
-  }
-
-  .pond-button:hover {
-    background: rgb(36 118 64 / 0.96);
-  }
-
-  .pond-button:active {
-    box-shadow:
-      inset 0 0 0 1px rgb(168 230 161 / 0.35),
-      2px 2px 0 rgb(2 14 9 / 0.4);
-  }
-
   /* Pupils flicking left, centre, right, centre. */
   .pixel-look {
     animation: pixel-look 2.6s steps(1, end) infinite;

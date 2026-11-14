@@ -185,9 +185,11 @@ literal hex values in those classes and match the sprite (`#0b3a1f` ink,
   big window (`pond`, 760×540); `open_pond` hides the popover and the frog
   overlay, centres the pond, raises it always-on-top and emits
   `pond-panel-shown` so the frog hops in.
-- `SettingsPond.tsx` draws the lilypad background, the left status HUD and three
-  lilypad buttons (pause nudges, croak sounds, back to desktop). Closing via
-  "Back to desktop", Escape or `hide_pond` hides the pond and shows the frog.
+- `SettingsPond.tsx` draws the lilypad background and the left status HUD. The
+  pond is a **normal decorated window** (title bar with minimise / maximise /
+  close); there are no in-window buttons now. The title-bar X is intercepted in
+  Rust (`CloseRequested` → `prevent_close`, hide the pond, show the frog), and
+  Escape does the same via `hide_pond`.
 - Stats come from the `frog_stats` command, polled every 2 s: anxiety is the pond
   stress score; focus is `1 − (0.6 × switch pressure + 0.4 if on a feed)`; the
   HUD also lists keys, backspaces, switches, hesitation, reversals, scrolls,

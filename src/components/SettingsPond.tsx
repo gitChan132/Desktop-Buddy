@@ -7,8 +7,6 @@ import lilypadPond from "../assets/frog/lilypad-pond.jpg";
 import greenSpritesheet from "../assets/frog/green_spritesheet.png";
 import {
   loadSettings,
-  saveNudgesPaused,
-  saveSoundEnabled,
   watchSettings,
   type FrogSettings,
 } from "../settings";
@@ -235,18 +233,6 @@ export function SettingsPond() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [close]);
 
-  const setPaused = () => {
-    const nudgesPaused = !settings.nudgesPaused;
-    setSettings((previous) => ({ ...previous, nudgesPaused }));
-    void saveNudgesPaused(nudgesPaused).catch(() => {});
-  };
-
-  const setSound = () => {
-    const soundEnabled = !settings.soundEnabled;
-    setSettings((previous) => ({ ...previous, soundEnabled }));
-    void saveSoundEnabled(soundEnabled).catch(() => {});
-  };
-
   const stress = stats?.stress ?? 0;
   const focus = stats?.focus ?? 0;
   const stressHistory = history.map((sample) => sample.stress);
@@ -321,43 +307,15 @@ export function SettingsPond() {
         <PondFrog />
       </motion.div>
 
-      {/* Lilypad menu */}
+      {/* Pond label */}
       <div className="absolute right-[4%] top-[8%] text-right">
         <p className="text-[22px] uppercase leading-none tracking-[0.14em] text-emerald-50 drop-shadow-[2px_2px_0_rgba(4,23,15,0.8)]">
           The pond
         </p>
         <p className="text-[14px] text-emerald-100/80 drop-shadow-[1px_1px_0_rgba(4,23,15,0.8)]">
-          tap a lilypad
+          how your pond is doing
         </p>
       </div>
-
-      <button
-        type="button"
-        onClick={setPaused}
-        className="pond-button absolute left-[56%] top-[36%] -translate-x-1/2 -translate-y-1/2 px-3 py-1.5 text-[15px] uppercase tracking-[0.06em]"
-      >
-        {settings.nudgesPaused ? "resume nudges" : "pause nudges"}
-      </button>
-
-      <button
-        type="button"
-        onClick={setSound}
-        className="pond-button absolute left-[78%] top-[52%] -translate-x-1/2 -translate-y-1/2 px-3 py-1.5 text-[15px] uppercase tracking-[0.06em]"
-      >
-        croaks: {settings.soundEnabled ? "on" : "off"}
-      </button>
-
-      <button
-        type="button"
-        onClick={close}
-        className="pond-button absolute left-[64%] top-[76%] -translate-x-1/2 -translate-y-1/2 px-3 py-1.5 text-[15px] uppercase tracking-[0.06em]"
-      >
-        back to desktop
-      </button>
-
-      <p className="absolute bottom-2 right-3 text-[11px] uppercase tracking-[0.08em] text-emerald-100/50">
-        esc closes the pond
-      </p>
     </div>
   );
 }
