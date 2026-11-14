@@ -513,9 +513,9 @@ export function FeelingFrog({
           }
         : grumpy
           ? {
-              // Shock row, wide-eyed upright frame: the closest thing the
-              // sheet has to an annoyed glare.
-              column: ANIMATIONS.shock.column + 1,
+              // Shock row, seated wide-eyed frame (frame 0, open mouth): the
+              // annoyed-but-sitting look, not the stretched airborne one.
+              column: ANIMATIONS.shock.column + 0,
               row: ANIMATIONS.shock.row,
             }
           : {
@@ -528,7 +528,7 @@ export function FeelingFrog({
 
   return (
     <div className="relative h-full w-full">
-      <div className="absolute inset-x-0 bottom-[calc(0.75rem+192px)] flex justify-center">
+      <div className="absolute inset-x-0 bottom-[106px] flex justify-center">
         <AnimatePresence>
           {intervention && !croaking && (
             <motion.div
@@ -598,7 +598,32 @@ export function FeelingFrog({
             // Lean into the throw, then straighten up once he lands.
             transform: tilt === 0 ? undefined : `rotate(${tilt}deg)`,
           }}
-        />
+        >
+          {grumpy && (
+            <>
+              {/* Wide-eyed glare with pupils that flick left and right. The
+                  sclera is a 3x3 pixel block at x11/x18, y21 of the seated
+                  shock-0 cell (rendered at 6x), so we repaint it white over the
+                  baked pupil and animate our own. */}
+              <span
+                className="absolute bg-white"
+                style={{ left: 66, top: 126, width: 18, height: 18 }}
+              />
+              <span
+                className="absolute bg-white"
+                style={{ left: 108, top: 126, width: 18, height: 18 }}
+              />
+              <span
+                className="pixel-look absolute bg-black"
+                style={{ left: 72, top: 132, width: 6, height: 6 }}
+              />
+              <span
+                className="pixel-look absolute bg-black"
+                style={{ left: 114, top: 132, width: 6, height: 6 }}
+              />
+            </>
+          )}
+        </span>
       </motion.button>
       </div>
     </div>

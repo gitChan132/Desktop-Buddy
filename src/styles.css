@@ -84,6 +84,34 @@
     animation: pixel-shake 2.4s steps(1, end) infinite;
   }
 
+  /* Pupils flicking left, centre, right, centre. */
+  .pixel-look {
+    animation: pixel-look 2.6s steps(1, end) infinite;
+  }
+
+  @keyframes pixel-look {
+    0%,
+    18% {
+      transform: translateX(0);
+    }
+    20%,
+    38% {
+      transform: translateX(-6px);
+    }
+    40%,
+    58% {
+      transform: translateX(0);
+    }
+    60%,
+    78% {
+      transform: translateX(6px);
+    }
+    80%,
+    100% {
+      transform: translateX(0);
+    }
+  }
+
   @keyframes pixel-shake {
     0%,
     30%,

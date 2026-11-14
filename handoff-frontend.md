@@ -225,8 +225,10 @@ opens `VisualGrounding.tsx` (~29s eyes-off-screen exercise) for
 - Demo/test overrides: `FROG_DOOMSCROLL_SECS`, `FROG_DOOMSCROLL_SCROLLS`,
   `FROG_SHORTS_SECS`, `FROG_SHORTS_SCROLLS` (alongside `FROG_EVAL_SECS`).
 - Frontend: `App` maps `trigger === "doomscroll"` to the `grumpy` mood;
-  `FeelingFrog` shows shock frame 1 (wide-eyed glare) with the `.pixel-shake`
-  CSS animation.
+  `FeelingFrog` shows the **seated** wide-eyed shock frame (shock 0, open mouth)
+  with `.pixel-shake`, plus a DOM overlay that repaints the eye whites and
+  animates the pupils left/right (`.pixel-look`). The overlay sits inside the
+  sprite span so it shakes with him; its coordinates assume that shock-0 cell.
 
 ---
 
