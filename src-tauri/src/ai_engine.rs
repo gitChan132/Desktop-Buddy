@@ -6,6 +6,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
+use crate::settings;
 use crate::telemetry::{self, ScrollSnapshot, TypingSnapshot};
 use crate::window_tracker::{self, WindowSnapshot};
 
@@ -507,6 +508,11 @@ pub fn start(app: AppHandle) {
 
         loop {
             std::thread::sleep(evaluation_interval());
+            // Paused from the menu-bar control panel: keep the loop alive but
+            // never fire a nudge.
+            if settings::nudges_paused() {
+                continue;
+            }
 
             let typing = telemetry::snapshot();
             let windows = window_tracker::snapshot();

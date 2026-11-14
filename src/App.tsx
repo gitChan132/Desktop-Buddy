@@ -2,6 +2,8 @@ import { listen } from "@tauri-apps/api/event";
 import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import type { BreathPhase } from "./breathing";
+import { applySoundSettings } from "./croak";
+import { loadSettings, watchSettings } from "./settings";
 import { BreatheAlong } from "./components/BreatheAlong";
 import { ChatWithFrog } from "./components/ChatWithFrog";
 import { FeelingFrog, type FrogMood } from "./components/FeelingFrog";
@@ -83,6 +85,16 @@ export default function App() {
       "trigger-intervention",
       (event) => setIntervention(event.payload),
     );
+    return () => {
+      void unlisten.then((off) => off());
+    };
+  }, []);
+
+  // Sound preferences live in the backend (shared with the tray menu); mirror
+  // them into the croak synth and follow live changes from the control panel.
+  useEffect(() => {
+    void loadSettings().then(applySoundSettings).catch(() => {});
+    const unlisten = watchSettings(applySoundSettings);
     return () => {
       void unlisten.then((off) => off());
     };

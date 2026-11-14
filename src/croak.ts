@@ -1,5 +1,18 @@
+/** Live sound preferences pushed from the menu-bar control panel. */
+let soundEnabled = true;
+let volume = 0.5;
+
+export function applySoundSettings(settings: {
+  soundEnabled: boolean;
+  volume: number;
+}) {
+  soundEnabled = settings.soundEnabled;
+  volume = Math.min(1, Math.max(0, settings.volume));
+}
+
 /** Short low croak: a filtered saw that falls in pitch. Best effort only. */
 export function playCroak() {
+  if (!soundEnabled || volume <= 0) return;
   try {
     const ctx = new AudioContext();
     void ctx.resume();
@@ -17,7 +30,7 @@ export function playCroak() {
     filter.frequency.value = 750;
 
     gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.06, now + 0.035);
+    gain.gain.exponentialRampToValueAtTime(0.12 * volume, now + 0.035);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
 
     osc.connect(filter);
