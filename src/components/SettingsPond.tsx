@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { motion } from "framer-motion";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -20,8 +21,6 @@ import {
 } from "../settings";
 
 /** Panel window is 760x540 CSS px (see tauri.conf.json). */
-const PANEL_W = 760;
-const PANEL_H = 540;
 const FROG_SIZE = 190;
 /** Where he lands: top-left of the frog sprite, on the pond's lilypad. */
 const LAND = { x: 440, y: 97 };
@@ -31,14 +30,6 @@ const IDLE_FRAMES = 4;
 
 /** Small wait helper for the entrance choreography. */
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-
-type EntrancePhase =
-  | "waiting"
-  | "turning"
-  | "jumping"
-  | "landing"
-  | "returning"
-  | "idle";
 
 type View = "status" | "settings" | "activities" | "modes";
 
@@ -307,11 +298,11 @@ export function SettingsPond() {
   const [view, setView] = useState<View>("status");
   const [running, setRunning] = useState<{ id: ActivityId; step: number } | null>(null);
   const [mode, setMode] = useState<string | null>(null);
-  const [start, setStart] = useState({ x: 300, y: 120 });
-  const [phase, setPhase] = useState<EntrancePhase>("idle");
   const [turnRow, setTurnRow] = useState<number | null>(null);
   const [visible, setVisible] = useState(false);
   const runId = useRef(0);
+  const lastDirection = useRef<"left" | "right">("right");
+  const landedRef = useRef(false);
 
   // Settings: load, keep in sync, and mirror into the croak synth.
   useEffect(() => {
@@ -359,83 +350,88 @@ export function SettingsPond() {
     };
   }, []);
 
-  // Entrance: sit where he is for a beat, turn away from the camera in the
-  // direction of the lilypad, jump in, land facing away, then turn back.
-  const runEntrance = useCallback(async () => {
-    const run = ++runId.current;
-    setVisible(false);
-    setPhase("waiting");
-    setTurnRow(null);
-    setRunning(null);
-
-    let anchorX = 300;
-    let anchorY = 120;
-    try {
-      const win = getCurrentWindow();
-      const [origin, scale] = await Promise.all([
-        win.outerPosition(),
-        win.scaleFactor(),
-      ]);
-      const anchor = await invoke<{ x: number; y: number } | null>("frog_anchor");
-      if (anchor) {
-        anchorX = (anchor.x - origin.x) / scale - FROG_SIZE / 2;
-        anchorY = (anchor.y - origin.y) / scale - FROG_SIZE * 0.8;
-      }
-    } catch {
-      // Keep the default start point.
-    }
-    const from = {
-      // Keep his body near the pond edge when he starts outside the window.
-      x: Math.max(-60, Math.min(PANEL_W - FROG_SIZE * 0.7, anchorX)),
-      y: Math.max(-60, Math.min(PANEL_H - FROG_SIZE * 0.85, anchorY)),
-    };
-    setStart(from);
-
-    // A full beat sitting exactly where he was on the desktop.
-    await sleep(1000);
-    if (run !== runId.current) return;
-    try {
-      await invoke("hide_frog_overlay");
-    } catch {
-      // Browser preview: no overlay window to hide.
-    }
-    if (run !== runId.current) return;
+  // Landing: the real frog has arrived on the pad; take over, face away, then
+  // turn back to the viewer.
+  const finishLanding = useCallback(async () => {
+    const run = runId.current;
+    landedRef.current = true;
     setVisible(true);
-
-    // The sheet's rows are eight facings: 0 front, 4 back, 1-3/5-7 between.
-    const jumpingRight =
-      from.x + FROG_SIZE / 2 <= LAND.x + FROG_SIZE / 2;
-    const away = jumpingRight ? [0, 1, 2, 3, 4] : [0, 7, 6, 5, 4];
-
-    setPhase("turning");
-    for (let index = 1; index < away.length; index++) {
-      setTurnRow(away[index]);
-      await sleep(90);
-      if (run !== runId.current) return;
-    }
-
-    setTurnRow(null);
-    setPhase("jumping");
-    await sleep(900);
-    if (run !== runId.current) return;
-
-    setPhase("landing");
     setTurnRow(4);
     playCroak();
     await sleep(280);
     if (run !== runId.current) return;
 
-    setPhase("returning");
-    for (const row of away.slice(1, -1).reverse()) {
+    const back = lastDirection.current === "right" ? [3, 2, 1, 0] : [5, 6, 7, 0];
+    for (const row of back) {
       setTurnRow(row);
       await sleep(90);
       if (run !== runId.current) return;
     }
-    setTurnRow(0);
-    await sleep(120);
     setTurnRow(null);
-    setPhase("idle");
   }, []);
+
+  // Entrance: leave him on the desktop for a beat, then ask the real frog
+  // window to turn and jump across the desktop onto the pond's lilypad.
+  const runEntrance = useCallback(async () => {
+    const run = ++runId.current;
+    landedRef.current = false;
+    setVisible(false);
+    setTurnRow(null);
+    setRunning(null);
+
+    let pondOrigin = { x: 0, y: 0 };
+    let scale = 1;
+    let anchor: { x: number; y: number } | null = null;
+    try {
+      const win = getCurrentWindow();
+      const [origin, factor] = await Promise.all([
+        win.outerPosition(),
+        win.scaleFactor(),
+      ]);
+      pondOrigin = origin;
+      scale = factor;
+      anchor = await invoke<{ x: number; y: number } | null>("frog_anchor");
+    } catch {
+      // Browser preview: no windows to coordinate.
+    }
+
+    // A full beat sitting exactly where he was on the desktop.
+    await sleep(1000);
+    if (run !== runId.current) return;
+
+    // Main frog centre is (167, 366) in its 340x420 window; pond frog centre is
+    // (LAND.x + 92, LAND.y + 148). Move the real window so those coincide.
+    const targetX = pondOrigin.x + (LAND.x + 92 - 167) * scale;
+    const targetY = pondOrigin.y + (LAND.y + 148 - 366) * scale;
+    const direction =
+      anchor && targetX + 167 * scale < anchor.x ? "left" : "right";
+    lastDirection.current = direction;
+
+    try {
+      await invoke("start_pond_jump", {
+        request: { targetX, targetY, direction },
+      });
+    } catch {
+      // Browser preview: just stand him on the pad.
+      setVisible(true);
+      setTurnRow(0);
+      return;
+    }
+
+    // If the overlay never reports back, show him on the pad anyway.
+    window.setTimeout(() => {
+      if (run === runId.current && !landedRef.current) void finishLanding();
+    }, 3000);
+  }, [finishLanding]);
+
+  useEffect(() => {
+    const unlisten = listen("pond-jump-done", () => {
+      void finishLanding();
+    });
+    return () => {
+      void unlisten.then((off) => off());
+    };
+  }, [finishLanding]);
 
   // The popover can ask for a specific tab, and every open bumps a show counter.
   // Poll a (tab, seq, showSeq) triple instead of trusting an event payload: the
@@ -801,31 +797,18 @@ export function SettingsPond() {
         )}
       </div>
 
-      {/* Frog: sits on the desktop for a beat, turns, jumps in, turns back. */}
+      {/* The real frog flies in from the desktop; this copy takes over on landing */}
       <motion.div
         className="pointer-events-none absolute left-0 top-0"
         initial={false}
-        animate={
-          phase === "jumping"
-            ? {
-                x: [start.x, (start.x + LAND.x) / 2, LAND.x],
-                y: [start.y, Math.min(start.y, LAND.y) - 130, LAND.y],
-              }
-            : phase === "landing" || phase === "returning" || phase === "idle"
-              ? { x: LAND.x, y: LAND.y }
-              : { x: start.x, y: start.y }
-        }
-        transition={
-          phase === "jumping"
-            ? { duration: 0.9, times: [0, 0.55, 1], ease: "easeInOut" }
-            : { duration: 0.08 }
-        }
+        animate={{ x: LAND.x, y: LAND.y }}
+        transition={{ duration: 0.08 }}
         style={{ opacity: visible ? 1 : 0 }}
       >
         <PondFrog
           breatheFrame={breatheFrame}
           pose={turnRow === null ? null : { column: 0, row: turnRow }}
-          jumping={phase === "jumping"}
+          jumping={false}
         />
       </motion.div>
 

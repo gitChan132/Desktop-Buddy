@@ -1,4 +1,5 @@
 import { PhysicalPosition } from "@tauri-apps/api/dpi";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -490,6 +491,91 @@ export function FeelingFrog({
     });
   }, [intervention, hop]);
 
+  // Pond entrance: the real frog turns, jumps across the desktop onto the pond
+  // lilypad, then hands over to the pond's own sprite.
+  const [entrance, setEntrance] = useState<{ row: number; jumping: boolean } | null>(
+    null,
+  );
+  const [entranceJumpFrame, setEntranceJumpFrame] = useState(0);
+
+  useEffect(() => {
+    if (!entrance?.jumping) return;
+    const id = setInterval(
+      () => setEntranceJumpFrame((current) => (current + 1) % 4),
+      1000 / 10,
+    );
+    return () => clearInterval(id);
+  }, [entrance?.jumping]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+    const unlistenJump = listen<{
+      targetX: number;
+      targetY: number;
+      direction: "left" | "right";
+    }>("pond-jump", (event) => {
+      void (async () => {
+        const win = getCurrentWindow();
+        const start = await win.outerPosition();
+        const away =
+          event.payload.direction === "right" ? [0, 1, 2, 3, 4] : [0, 7, 6, 5, 4];
+
+        for (let index = 1; index < away.length; index++) {
+          if (cancelled) return;
+          setEntrance({ row: away[index], jumping: false });
+          await sleep(90);
+        }
+        if (cancelled) return;
+        setEntrance({ row: 4, jumping: true });
+
+        const started = performance.now();
+        const duration = 900;
+        const lift = 190;
+        await new Promise<void>((resolve) => {
+          const step = (now: number) => {
+            if (cancelled) {
+              resolve();
+              return;
+            }
+            const t = Math.min(1, (now - started) / duration);
+            const x = start.x + (event.payload.targetX - start.x) * t;
+            const y =
+              start.y +
+              (event.payload.targetY - start.y) * t -
+              Math.sin(Math.PI * t) * lift;
+            void win.setPosition(new PhysicalPosition(Math.round(x), Math.round(y)));
+            if (t < 1) requestAnimationFrame(step);
+            else resolve();
+          };
+          requestAnimationFrame(step);
+        });
+
+        if (cancelled) {
+          await win.setPosition(start);
+          return;
+        }
+        await invoke("finish_pond_jump");
+        await win.hide();
+        setEntrance(null);
+        await win.setPosition(start);
+      })();
+    });
+
+    // The pond can close mid-flight; abort and put him back.
+    const unlistenHidden = listen("pond-hidden", () => {
+      cancelled = true;
+    });
+
+    return () => {
+      cancelled = true;
+      void unlistenJump.then((off) => off());
+      void unlistenHidden.then((off) => off());
+    };
+  }, []);
+
   const croaking = mood === "croaking";
   const curious = mood === "curious";
   const grumpy = mood === "grumpy";
@@ -497,11 +583,17 @@ export function FeelingFrog({
   const animation: AnimationName = croaking || curious ? "croak" : "idle";
   const framesPerSecond = croaking ? 2.5 : curious ? 8 : 6;
   const frame = useSpriteFrame(animation, framesPerSecond);
-
   // Carried and airborne poses come from fixed frames rather than the mood
   // loop: dangling while held, wide-eyed and stretched while thrown, the croak
   // row's throat puff while breathing along, and a glare when he is cross.
-  const pose = flying
+  const pose = entrance
+    ? {
+        column: entrance.jumping
+          ? ANIMATIONS.jump.column + entranceJumpFrame
+          : ANIMATIONS.idle.column,
+        row: entrance.jumping ? 4 : entrance.row,
+      }
+    : flying
     ? FLIGHT_FRAMES[flightPose]
     : held
       ? {

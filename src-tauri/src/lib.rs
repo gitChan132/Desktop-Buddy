@@ -429,6 +429,28 @@ fn open_pond(app: AppHandle, tab: Option<String>) {
     let _ = app.emit(PANEL_OPENED_EVENT, tab);
 }
 
+/// Coordinates for the real frog's flight onto the pond lilypad.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JumpRequest {
+    target_x: f64,
+    target_y: f64,
+    direction: String,
+}
+
+/// Asks the real frog window to turn and jump onto the pond. Rust relays the
+/// event so the request does not depend on the pond's webview emitting events.
+#[tauri::command]
+fn start_pond_jump(app: AppHandle, request: JumpRequest) {
+    let _ = app.emit("pond-jump", request);
+}
+
+/// The frog has landed; tell the pond to take over with its own sprite.
+#[tauri::command]
+fn finish_pond_jump(app: AppHandle) {
+    let _ = app.emit("pond-jump-done", ());
+}
+
 /// Called by the pond after it has let the frog sit on the desktop for a beat.
 /// Only hides him when the pond is actually visible, so a close during the
 /// delay cannot leave the frog invisible.
@@ -448,6 +470,7 @@ fn hide_pond(app: AppHandle) {
         let _ = pond.hide();
     }
     set_main_visible(&app, true);
+    let _ = app.emit("pond-hidden", ());
 }
 
 /// Opens the macOS Accessibility pane so the user can grant the selection
@@ -480,6 +503,8 @@ pub fn run() {
             open_pond,
             hide_pond,
             hide_frog_overlay,
+            start_pond_jump,
+            finish_pond_jump,
             pond_tab
         ])
         .setup(|app| {
@@ -533,6 +558,7 @@ pub fn run() {
                         api.prevent_close();
                         let _ = pond_window.hide();
                         set_main_visible(&pond_handle, true);
+                        let _ = pond_handle.emit("pond-hidden", ());
                     }
                 });
             }
