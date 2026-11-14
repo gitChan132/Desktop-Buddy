@@ -438,11 +438,49 @@ struct JumpRequest {
     direction: String,
 }
 
+/// Latest jump request, kept so the frog overlay can fetch it if the event was
+/// missed while its webview was idle (or before its listener was attached).
+static POND_JUMP: Mutex<Option<JumpRequest>> = Mutex::new(None);
+static POND_JUMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PendingJump {
+    seq: u64,
+    request: JumpRequest,
+}
+
 /// Asks the real frog window to turn and jump onto the pond. Rust relays the
 /// event so the request does not depend on the pond's webview emitting events.
+/// The request is also stored so the overlay can poll for it: events are not
+/// replayed to a webview that was asleep when they were emitted.
 #[tauri::command]
 fn start_pond_jump(app: AppHandle, request: JumpRequest) {
-    let _ = app.emit("pond-jump", request);
+    if let Ok(mut pending) = POND_JUMP.lock() {
+        *pending = Some(request.clone());
+    }
+    let seq = POND_JUMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1;
+    let _ = app.emit("pond-jump", PendingJump { seq, request });
+}
+
+/// The most recent jump request, for the overlay's polling fallback. Only
+/// answers while the pond is visible, so a reloaded overlay cannot replay an
+/// old request and hide the frog on the desktop.
+#[tauri::command]
+fn pending_pond_jump(app: AppHandle) -> Option<PendingJump> {
+    let pond = app.get_webview_window(POND_LABEL)?;
+    if !pond.is_visible().unwrap_or(false) {
+        return None;
+    }
+    let seq = POND_JUMP_SEQ.load(std::sync::atomic::Ordering::Acquire);
+    if seq == 0 {
+        return None;
+    }
+    POND_JUMP
+        .lock()
+        .ok()
+        .and_then(|pending| pending.clone())
+        .map(|request| PendingJump { seq, request })
 }
 
 /// The frog has landed; tell the pond to take over with its own sprite.
@@ -504,6 +542,7 @@ pub fn run() {
             hide_pond,
             hide_frog_overlay,
             start_pond_jump,
+            pending_pond_jump,
             finish_pond_jump,
             pond_tab
         ])

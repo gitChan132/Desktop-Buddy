@@ -508,27 +508,48 @@ export function FeelingFrog({
   }, [entrance?.jumping]);
 
   useEffect(() => {
-    let cancelled = false;
+    let disposed = false;
+    // Bumped to abort an in-flight jump. Unlike a single boolean it resets on
+    // every new request, so closing the pond once cannot break later jumps.
+    let activeRun = 0;
+    let lastSeq = 0;
     const sleep = (ms: number) =>
       new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-    const unlistenJump = listen<{
-      targetX: number;
-      targetY: number;
-      direction: "left" | "right";
-    }>("pond-jump", (event) => {
+    type JumpPayload = {
+      seq: number;
+      request: {
+        targetX: number;
+        targetY: number;
+        direction: "left" | "right";
+      };
+    };
+
+    const runJump = (payload: JumpPayload) => {
+      if (disposed || payload.seq <= lastSeq) return;
+      lastSeq = payload.seq;
+      const run = ++activeRun;
+      const request = payload.request;
+      const aborted = () => disposed || run !== activeRun;
+
       void (async () => {
         const win = getCurrentWindow();
         const start = await win.outerPosition();
         const away =
-          event.payload.direction === "right" ? [0, 1, 2, 3, 4] : [0, 7, 6, 5, 4];
+          request.direction === "right" ? [0, 1, 2, 3, 4] : [0, 7, 6, 5, 4];
 
         for (let index = 1; index < away.length; index++) {
-          if (cancelled) return;
+          if (aborted()) {
+            setEntrance(null);
+            return;
+          }
           setEntrance({ row: away[index], jumping: false });
           await sleep(90);
         }
-        if (cancelled) return;
+        if (aborted()) {
+          setEntrance(null);
+          return;
+        }
         setEntrance({ row: 4, jumping: true });
 
         const started = performance.now();
@@ -536,24 +557,27 @@ export function FeelingFrog({
         const lift = 190;
         await new Promise<void>((resolve) => {
           const step = (now: number) => {
-            if (cancelled) {
+            if (aborted()) {
               resolve();
               return;
             }
             const t = Math.min(1, (now - started) / duration);
-            const x = start.x + (event.payload.targetX - start.x) * t;
+            const x = start.x + (request.targetX - start.x) * t;
             const y =
               start.y +
-              (event.payload.targetY - start.y) * t -
+              (request.targetY - start.y) * t -
               Math.sin(Math.PI * t) * lift;
-            void win.setPosition(new PhysicalPosition(Math.round(x), Math.round(y)));
+            win
+              .setPosition(new PhysicalPosition(Math.round(x), Math.round(y)))
+              .catch(() => {});
             if (t < 1) requestAnimationFrame(step);
             else resolve();
           };
           requestAnimationFrame(step);
         });
 
-        if (cancelled) {
+        if (aborted()) {
+          setEntrance(null);
           await win.setPosition(start);
           return;
         }
@@ -562,15 +586,35 @@ export function FeelingFrog({
         setEntrance(null);
         await win.setPosition(start);
       })();
+    };
+
+    const unlistenJump = listen<JumpPayload>("pond-jump", (event) => {
+      runJump(event.payload);
     });
 
-    // The pond can close mid-flight; abort and put him back.
+    // The pond can close mid-flight; abort and put him back. This must not
+    // poison the next jump.
     const unlistenHidden = listen("pond-hidden", () => {
-      cancelled = true;
+      activeRun += 1;
+      setEntrance(null);
     });
+
+    // Polling fallback: the request is also stored in Rust, so the entrance
+    // still starts if the event was emitted while this webview was idle.
+    const poll = async () => {
+      try {
+        const pending = await invoke<JumpPayload | null>("pending_pond_jump");
+        if (!disposed && pending) runJump(pending);
+      } catch {
+        // Backend unavailable (browser preview).
+      }
+    };
+    void poll();
+    const pollId = setInterval(poll, 200);
 
     return () => {
-      cancelled = true;
+      disposed = true;
+      clearInterval(pollId);
       void unlistenJump.then((off) => off());
       void unlistenHidden.then((off) => off());
     };

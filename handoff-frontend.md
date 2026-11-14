@@ -228,7 +228,9 @@ may still be loading when the request fires; `open_pond` also emits
   the frog window animates itself with `setPosition`, then calls
   `finish_pond_jump`, hides and restores its old position. The pond's own sprite
   takes over facing away and turns back to the viewer. `pond-hidden` aborts a
-  mid-flight entrance and puts him back.
+  mid-flight entrance and puts him back, but must not disable later jumps: the
+  frog tracks jumps with a run counter, and it polls `pending_pond_jump` every
+  200 ms as a fallback in case the `pond-jump` event was missed.
 - `FROG_OPEN_PANEL=1` opens the popover at launch and `FROG_OPEN_POND=1` opens
   the pond directly, both for demos/testing.
 

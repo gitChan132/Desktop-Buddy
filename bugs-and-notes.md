@@ -78,6 +78,15 @@ Last updated: 2026-11-14 · branch `main`
     target of `(365,-121)` from a `(0,0)` origin, so the frog overshot the pad
     and the copy only appeared after the 3-second fallback. Capability windows
     are now `["main", "panel", "pond"]`.
+16. **A one-shot `cancelled` flag in the frog's jump listener broke every jump
+    after the first pond close.** The `pond-hidden` handler set `cancelled =
+    true` for the lifetime of the effect, so after closing the pond once no
+    later `pond-jump` ever moved the window again: the pond copy appeared via
+    the 3-second fallback while the real frog stayed put. The listener now uses
+    a run counter that each request bumps, `pond-hidden` only aborts the run in
+    flight, and `start_pond_jump` stores the request (with a sequence number)
+    so `FeelingFrog` can also poll `pending_pond_jump` every 200 ms — events
+    are not replayed to a webview that was idle when they were emitted.
 
 ---
 
