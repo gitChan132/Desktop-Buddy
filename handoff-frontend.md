@@ -51,8 +51,10 @@ thing; the rest of the window is click-through) that:
 | `src/App.tsx` | Window shell, click-through hitbox loop, event listener, mood wiring, mounts frog + guide |
 | `src/components/FeelingFrog.tsx` | Character rig: sprite animation, drag/carry, throw physics, intervention bubble, click-to-open |
 | `src/components/BreatheAlong.tsx` | Guided breathing bubble above the frog (bar, lines, phase chip, croak sound) |
-| `src/breathing.ts` | Shared breath phases (6s inhale / 6s hold / 9s exhale) used by both the guide and the sprite |
+| `src/breathing.ts` | Shared breath phases (3s inhale / 3s hold / 5s exhale) used by both the guide and the sprite |
 | `src/assets/frog/green_spritesheet.png` | The green sprite sheet (16×16 grid of 32px cells) |
+| `src/assets/fonts/vt323.woff2` | Bundled retro dialogue font (VT323, OFL) — no network needed at runtime |
+| `src/styles.css` | Base styles + `.pixel-panel` / `.pixel-chip` / `.pixel-button` / `.pixel-bar` / `.pixel-tail` |
 | `src-tauri/src/telemetry.rs` | Emits `cursor-pos`, `pond-stress`, and `pointer-release` (see §5) |
 | `src-tauri/tauri.conf.json` | Transparent window + `additionalBrowserArgs` (see §6) |
 | `src-tauri/capabilities/default.json` | Window permissions (position, cursor, ignore-cursor-events) |
@@ -68,7 +70,7 @@ Working tree changes on top of `e5353db`:
 
 1. **Breathing bar now breathes instead of looping.**
    `BreatheAlong.tsx` sets `barFrom`/`barTo`: 0→100% on inhale, stays 100% on
-   hold, 100→0% on exhale. The phase label (`6 · 6 · 9`) is now derived from
+   hold, 100→0% on exhale. The phase label (`3 · 3 · 5`) is now derived from
    `BREATH_PHASES` instead of hard-coded.
 
 2. **Frog's cheeks follow the breath.**
@@ -148,12 +150,29 @@ The intervention speech bubble is hidden while `croaking`.
 
 - Two boxes above the frog: the speech bubble (title, animated line, bar, phase
   dots, round, Close) and a dark chip with the live cue and a tail pointing at
-  his head.
-- Lines rotate per round (`LINES[phase][round === 1 ? 0 : 1]`).
+  his head.- Lines rotate per round (`LINES[phase][round === 1 ? 0 : 1]`).
 - A short filtered-saw croak plays at each exhale start; audio is best-effort
   and silently disabled if Web Audio is blocked.
 - The overlay is `pointer-events-none` except the boxes, so the frog remains
   visible and draggable.
+
+### Pixel UI kit
+
+Text boxes are styled through `styles.css` classes, not a pile of utilities:
+
+- `.pixel-panel` — VT323, 3px ink border, zero radius, hard 5px offset shadow,
+  faint 8px checkerboard dither, inner 2px highlight.
+- `.pixel-chip` + `.pixel-tail` — dark HUD badge and the stepped tail that points
+  at the frog.
+- `.pixel-button` — square Close button; the shadow collapses on `:active` so it
+  looks pressed.
+- `.pixel-bar` — bordered bar with a 1px inner highlight; fill is a square
+  `motion.div` whose width animates.
+
+The font lives at `src/assets/fonts/vt323.woff2` (bundled by Vite), so the
+overlay never needs the network. Change the palette in one place: the greens are
+literal hex values in those classes and match the sprite (`#0b3a1f` ink,
+`#e9fbe2` paper).
 
 ---
 
@@ -247,5 +266,5 @@ engine is expected to fall back to canned messages without one.
   100–200ms to see the post-release trail and settle point.
 - **Grab:** drag to an arbitrary point, check `cursor − window.topLeft` equals the
   crown offset (≈ `209, 367` at 125% DPI).
-- **Breathing guide:** open, capture at ~1s / ~5s / ~8s / ~16s to hit inhale,
+- **Breathing guide:** open, capture at ~0.5s / ~2.5s / ~4s / ~7s to hit inhale,
   late inhale, hold, exhale.

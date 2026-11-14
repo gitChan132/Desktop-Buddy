@@ -531,20 +531,20 @@ export function FeelingFrog({
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 6, scale: 0.94 }}
               transition={{ type: "spring", stiffness: 320, damping: 24 }}
-              className="pointer-events-auto relative w-[260px] overflow-hidden rounded-2xl border border-emerald-900/10 bg-emerald-50/95 px-3.5 pt-2.5 pb-3.5 text-[12px] leading-snug text-emerald-950 shadow-lg shadow-emerald-950/10 backdrop-blur"
+              className="pixel-panel pointer-events-auto relative w-[260px] px-3 pt-2 pb-4 text-emerald-950"
             >
-              <p className="font-semibold">{intervention.message}</p>
-              <p className="mt-1 text-[11px] text-emerald-700">
+              <p className="text-[17px] leading-[1.15]">{intervention.message}</p>
+              <p className="mt-0.5 text-[14px] leading-none text-emerald-700">
                 {ACTION_LABEL[intervention.suggestedAction]}
               </p>
               {/* Timer bar: drains linearly until the bubble auto-dismisses. */}
               <span
                 aria-hidden
-                className="absolute inset-x-0 bottom-0 h-[3px] bg-emerald-900/10"
+                className="absolute inset-x-0 bottom-0 h-[3px] bg-emerald-900/15"
               >
                 <motion.span
                   key={`${intervention.id}-timer`}
-                  className="block h-full origin-left bg-emerald-500/70"
+                  className="block h-full origin-left bg-emerald-600"
                   initial={{ scaleX: 1 }}
                   animate={{ scaleX: 0 }}
                   transition={{

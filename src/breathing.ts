@@ -10,7 +10,7 @@ export interface BreathStep {
 }
 
 export const BREATH_PHASES: BreathStep[] = [
-  { key: "inhale", ms: 6000, label: "breathe in" },
-  { key: "hold", ms: 6000, label: "hold" },
-  { key: "exhale", ms: 9000, label: "breathe out" },
+  { key: "inhale", ms: 3000, label: "breathe in" },
+  { key: "hold", ms: 3000, label: "hold" },
+  { key: "exhale", ms: 5000, label: "breathe out" },
 ];

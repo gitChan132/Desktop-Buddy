@@ -113,17 +113,17 @@ export function BreatheAlong({ open, onClose, onPhase }: BreatheAlongProps) {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.97 }}
             transition={{ type: "spring", stiffness: 320, damping: 26 }}
-            className="pointer-events-auto w-[292px] rounded-2xl border border-emerald-900/10 bg-emerald-50/95 px-3.5 py-3 text-emerald-950 shadow-lg shadow-emerald-950/15 backdrop-blur"
+            className="pointer-events-auto pixel-panel w-[292px] px-3 py-2.5 text-emerald-950"
           >
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-700">
+            <div className="-mx-3 -mt-2.5 mb-2 flex items-center justify-between bg-[#0b3a1f] px-2 py-1">
+              <span className="text-[14px] uppercase leading-none tracking-[0.12em] text-emerald-100">
                 Breathe with me
               </span>
               <button
                 type="button"
                 onClick={onClose}
                 aria-label="Close the breathing guide"
-                className="rounded-full px-1.5 text-[12px] font-semibold leading-none text-emerald-700 transition hover:bg-emerald-900/10"
+                className="pixel-button px-1.5 py-0.5 text-[12px] uppercase leading-none text-emerald-900"
               >
                 Close
               </button>
@@ -136,14 +136,14 @@ export function BreatheAlong({ open, onClose, onPhase }: BreatheAlongProps) {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -5 }}
                 transition={{ duration: 0.18 }}
-                className="mt-1.5 min-h-[34px] text-[12px] font-medium leading-snug"
+                className="mt-1 min-h-[42px] text-[18px] leading-[1.15]"
               >
                 {line}
               </motion.p>
             </AnimatePresence>
 
             {/* Fills as you breathe in, stays full on the hold, drains on the way out. */}
-            <div className="mt-2 h-1 overflow-hidden rounded-full bg-emerald-900/10">
+            <div className="pixel-bar mt-1.5 h-2.5 overflow-hidden">
               <motion.div
                 key={`${round}-${phase.key}-bar`}
                 initial={{ width: barFrom }}
@@ -152,7 +152,7 @@ export function BreatheAlong({ open, onClose, onPhase }: BreatheAlongProps) {
                   duration: phase.key === "hold" ? 0 : phase.ms / 1000,
                   ease: "linear",
                 }}
-                className="h-full rounded-full bg-emerald-500"
+                className="h-full bg-emerald-500"
               />
             </div>
 
@@ -161,13 +161,13 @@ export function BreatheAlong({ open, onClose, onPhase }: BreatheAlongProps) {
                 {PHASES.map((item, index) => (
                   <span
                     key={item.key}
-                    className={`h-1.5 w-1.5 rounded-full transition-colors ${
+                    className={`h-2 w-2 transition-colors ${
                       index <= phaseIndex ? "bg-emerald-600" : "bg-emerald-900/15"
                     }`}
                   />
                 ))}
               </div>
-              <span className="text-[10px] text-emerald-700">
+              <span className="text-[14px] leading-none text-emerald-800">
                 {PHASES.map((item) => item.ms / 1000).join(" · ")} · round{" "}
                 {round}
               </span>
@@ -185,7 +185,7 @@ export function BreatheAlong({ open, onClose, onPhase }: BreatheAlongProps) {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 4 }}
             transition={{ duration: 0.2 }}
-            className="pointer-events-auto relative flex items-center gap-1.5 rounded-full bg-emerald-900/85 px-2.5 py-1 text-[10px] font-medium text-emerald-50 shadow-md shadow-emerald-950/25"
+            className="pixel-chip pointer-events-auto relative flex items-center gap-1.5 px-2.5 py-1 text-[15px] uppercase leading-none tracking-[0.06em] text-emerald-50"
           >
             <motion.span
               key={`${round}-${phase.key}-dot`}
@@ -196,10 +196,10 @@ export function BreatheAlong({ open, onClose, onPhase }: BreatheAlongProps) {
                 repeat: Infinity,
                 ease: "easeInOut",
               }}
-              className="h-1.5 w-1.5 rounded-full bg-emerald-300"
+              className="h-2 w-2 bg-emerald-300"
             />
             {phase.label}
-            <span className="absolute -bottom-1 left-1/2 h-2 w-2 -translate-x-1/2 rotate-45 bg-emerald-900/85" />
+            <span aria-hidden className="pixel-tail" />
           </motion.div>
         )}
       </AnimatePresence>
