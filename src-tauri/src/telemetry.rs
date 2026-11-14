@@ -46,7 +46,7 @@ const REVERSAL_MIN_STEP: f64 = 6.0;
 /// Direction reversals are judged within this shorter window.
 const OSCILLATION_WINDOW: Duration = Duration::from_secs(10);
 /// Reversals that saturate the oscillation component of the stress score.
-const MAX_REVERSALS: f32 = 8.0;
+const MAX_REVERSALS: f32 = 16.0;
 
 #[derive(Default)]
 struct TypingTelemetry {
@@ -672,7 +672,7 @@ mod tests {
             pointer.hesitations.push_back((now, 4.0));
         }
         // A saturated reversal count saturates the oscillation component.
-        for _ in 0..8 {
+        for _ in 0..16 {
             pointer.reversals.push_back(now);
         }
         let score = WeightedStress.score(&typing, &pointer);

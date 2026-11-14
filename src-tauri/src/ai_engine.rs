@@ -43,6 +43,10 @@ fn doomscroll_scrolls() -> usize {
         .unwrap_or(DOOMSCROLL_SCROLLS)
 }
 
+/// Back-and-forth cursor reversals needed within the oscillation window before
+/// it counts as stress. Set high — ordinary cursor moves flip direction often.
+const OSCILLATION_MIN_REVERSALS: usize = 14;
+
 const EVENT_NAME: &str = "trigger-intervention";
 
 const GEMINI_ENDPOINT: &str = "https://generativelanguage.googleapis.com/v1beta/models";
@@ -132,7 +136,7 @@ fn build_intervention(
             ),
             "lily_pad_step",
         )
-    } else if windows.direction_reversals >= 6 {
+    } else if windows.direction_reversals >= OSCILLATION_MIN_REVERSALS {
         (
             "cursor_oscillation",
             format!(
@@ -547,7 +551,7 @@ mod tests {
     #[test]
     fn cursor_oscillation_detected() {
         let windows = WindowSnapshot {
-            direction_reversals: 6,
+            direction_reversals: OSCILLATION_MIN_REVERSALS,
             ..Default::default()
         };
         let payload = build_intervention(&TypingSnapshot::default(), &windows, &ScrollSnapshot::default()).unwrap();
@@ -558,11 +562,11 @@ mod tests {
     #[test]
     fn detection_detail_mentions_oscillation() {
         let windows = WindowSnapshot {
-            direction_reversals: 7,
+            direction_reversals: OSCILLATION_MIN_REVERSALS + 1,
             ..Default::default()
         };
         let detail = detection_detail("cursor_oscillation", &TypingSnapshot::default(), &windows, &ScrollSnapshot::default());
-        assert!(detail.contains("7 back-and-forth"));
+        assert!(detail.contains("15 back-and-forth"));
     }
 
     #[test]

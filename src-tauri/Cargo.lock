@@ -913,6 +913,8 @@ version = "0.1.0"
 dependencies = [
  "active-win-pos-rs",
  "dotenvy",
+ "objc2",
+ "objc2-app-kit",
  "rdev",
  "reqwest 0.12.28",
  "serde",
