@@ -17,7 +17,7 @@ const SWITCH_WINDOW: Duration = Duration::from_secs(20);
 /// Window used to count title changes inside the same app (short-form flips).
 const FLIP_WINDOW: Duration = Duration::from_secs(30);
 /// More than this many switches inside [`SWITCH_WINDOW`] is tab thrashing.
-const THRASH_SWITCHES: usize = 8;
+const THRASH_SWITCHES: usize = 5;
 /// Zero keyboard/mouse input this long while a focus app is active is an idle freeze.
 const IDLE_FREEZE: Duration = Duration::from_secs(150);
 
@@ -198,7 +198,7 @@ struct TrackerState {
 pub struct WindowSnapshot {
     pub active_app: Option<ActiveApp>,
     pub switches_in_window: usize,
-    /// Detected: more than 8 window/title switches in the last 20 seconds.
+    /// Detected: more than 5 window/title switches in the last 20 seconds.
     pub tab_thrashing: bool,
     /// Detected: 2.5 minutes without input while a browser or editor is active.
     pub idle_freeze: bool,

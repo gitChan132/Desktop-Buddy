@@ -1,4 +1,5 @@
 mod ai_engine;
+mod chat;
 mod telemetry;
 mod window_tracker;
 
@@ -49,6 +50,7 @@ fn position_bottom_right(window: &WebviewWindow) -> tauri::Result<()> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .invoke_handler(tauri::generate_handler![chat::frog_chat])
         .setup(|app| {
             telemetry::start(app.handle().clone());
             window_tracker::start();

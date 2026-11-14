@@ -193,9 +193,12 @@ them yet (candidate for stress-reactive moods).
 `FrogInterventionPayload` (`src/types.ts`): `id`, `trigger`
 (`frantic_typing | backspace_loop | tab_thrashing | idle_freeze | cursor_hesitation | cursor_oscillation | doomscroll`), `severity`,
 `message`, `suggestedAction`
-(`belly_breathe | visual_grounding`), optional `activeApp`. Clicking the frog
-opens `VisualGrounding.tsx` (~29s eyes-off-screen exercise) for
-`visual_grounding`; `belly_breathe` opens the breathing guide.
+(`belly_breathe | visual_grounding | task_intent | mindful_pause`), optional
+`activeApp`. Each trigger has a ranked activity list and the backend picks one
+at random per intervention. Clicking the frog opens the guide for its
+`suggestedAction`: breathing, `VisualGrounding.tsx`, `TaskIntention.tsx`, or
+`MindfulPause.tsx` (30s hands-off pause). With no nudge up, the click opens
+`ChatWithFrog.tsx`, which calls the persona-locked `frog_chat` Tauri command.
 
 ### Doomscroll detector
 
@@ -286,10 +289,11 @@ engine is expected to fall back to canned messages without one.
 3. **`hop` sprite band is unused**; the intervention hop is still framer-motion
    (`hop.start({ y: [-26, -14, 0] … })`). Could be replaced with the sprite jump
    row.
-4. **Only two actions exist.** `tab_thrashing` / `idle_freeze` / `doomscroll` →
-   `visual_grounding` opens `VisualGrounding.tsx`; the arousal triggers →
-   `belly_breathe` opens breathing. Future guides get their own action id and
-   branch in `App.openGrounding`.
+4. **Four actions exist.** `task_intent` → `TaskIntention.tsx`, `visual_grounding`
+   → `VisualGrounding.tsx`, `mindful_pause` → `MindfulPause.tsx`,
+   `belly_breathe` → breathing. Triggers list several apt actions (backend picks
+   randomly); future guides get their own action id and branch in
+   `App.openGrounding`. No-nudge clicks branch to `chat`.
 5. **Unused backend events** `cursor-pos` / `pond-stress` — wiring the stress
    score into `FrogMood` (e.g. faster croak, worried pose) is the obvious next
    feature.

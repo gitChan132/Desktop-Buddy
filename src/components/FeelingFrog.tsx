@@ -85,6 +85,8 @@ const ACTION_LABEL: Record<FrogInterventionPayload["suggestedAction"], string> =
   {
     belly_breathe: "Belly breathe with me",
     visual_grounding: "Look away with me",
+    task_intent: "Name one thing",
+    mindful_pause: "Pause with me",
   };
 
 // The sheet is a 16x16 grid of 32px cells. Each animation owns a 4-column

@@ -3,12 +3,20 @@ import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import type { BreathPhase } from "./breathing";
 import { BreatheAlong } from "./components/BreatheAlong";
+import { ChatWithFrog } from "./components/ChatWithFrog";
 import { FeelingFrog, type FrogMood } from "./components/FeelingFrog";
+import { MindfulPause } from "./components/MindfulPause";
+import { TaskIntention } from "./components/TaskIntention";
 import { VisualGrounding } from "./components/VisualGrounding";
 import { INTERVENTION_TTL_MS, type FrogInterventionPayload } from "./types";
 
 /** Guided activities the frog can lead; each maps to one `suggestedAction`. */
-type OpenActivity = "belly_breathe" | "visual_grounding";
+type OpenActivity =
+  | "belly_breathe"
+  | "visual_grounding"
+  | "task_intent"
+  | "mindful_pause"
+  | "chat";
 
 // Region (logical px, anchored bottom-center) where the frog is clickable.
 // Everything else in the transparent window stays click-through.
@@ -104,10 +112,14 @@ export default function App() {
   };
 
   // Clicking the frog opens the guide matching the nudge's suggested action;
-  // with no nudge it defaults to breathing.
+  // with no nudge up it just opens a chat.
   const openGrounding = () => {
     const action = intervention?.suggestedAction;
-    setActivity(action === "visual_grounding" ? "visual_grounding" : "belly_breathe");
+    if (!action) {
+      setActivity("chat");
+    } else {
+      setActivity(action === "belly_breathe" ? "belly_breathe" : action);
+    }
     setIntervention(null);
   };
 
@@ -129,6 +141,15 @@ export default function App() {
         open={activity === "visual_grounding"}
         onClose={closeActivity}
       />
+      <TaskIntention
+        open={activity === "task_intent"}
+        onClose={closeActivity}
+      />
+      <MindfulPause
+        open={activity === "mindful_pause"}
+        onClose={closeActivity}
+      />
+      <ChatWithFrog open={activity === "chat"} onClose={closeActivity} />
     </div>
   );
 }

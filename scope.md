@@ -27,7 +27,7 @@ bottom-right of the screen.
 | `backspace_loop` | ≥36 backspaces / 30s **or** streak ≥8 | Perfectionism / frustration spiral | `belly_breathe` |
 | `cursor_hesitation` | ≥3 clicks each preceded by ≥2s of cursor stillness, / 30s | Decision difficulty | `belly_breathe` |
 | `cursor_oscillation` | ≥6 significant direction reversals / 10s | Can't decide where to act next | `belly_breathe` |
-| `tab_thrashing` | >8 foreground window switches / 20s | Fragmented focus | `visual_grounding` |
+| `tab_thrashing` | >5 window switches / 20s | Fragmented focus | `task_intent` |
 | `idle_freeze` | ≥150s (2.5 min) zero input while a browser/editor is frontmost | Stuck, not resting | `visual_grounding` |
 | `doomscroll` | TikTok/Instagram app or a browser feed tab frontmost ≥4 min, ≥40 wheel events / 90s, <10 keystrokes / 30s | Compulsive scrolling | `visual_grounding` |
 
@@ -65,6 +65,8 @@ Recomputed every 5s, contributes the payload `severity` (`low` <40, `medium` <70
   `cursor-pos`, `pond-stress`, `pointer-release`.
 - `window_tracker.rs` — 2s foreground-window poll, 20s switch history, tab-thrash + idle
   freeze detection; builds the combined `WindowSnapshot`.
+- `chat.rs` — `frog_chat` command: fixed persona prompt, input guardrails
+  (identity/injection/homework/code), reply leak filter, crisis guidance.
 - `ai_engine.rs` — 20s evaluation loop, intervention selection, Gemini request/JSON parse,
   fallback copy, emits `trigger-intervention`.
 
@@ -76,6 +78,13 @@ Recomputed every 5s, contributes the payload `severity` (`low` <40, `medium` <70
 - `components/BreatheAlong.tsx` — guided breathing modal + chime.
 - `components/VisualGrounding.tsx` — ~29s 20-20-20 guide: look away, find three
   things, notice each one's colour/shape/texture.
+- `components/TaskIntention.tsx` — one-task intention setting: name one priority,
+  then a 20s focus beat; everything else is parked.
+- `components/MindfulPause.tsx` — 30s pause: hands off, soft eyes, watch the
+  breath without steering it, let attention settle.
+- `components/ChatWithFrog.tsx` — default click action: chat with the frog.
+  Calls the `frog_chat` Tauri command; persona-locked and out-of-scope requests
+  are deflected (see `src-tauri/src/chat.rs`).
 - `breathing.ts` — shared 3s inhale / 3s hold / 5s exhale rhythm.
 - `types.ts` — shared IPC contract (`BurnoutTrigger`, `FrogInterventionPayload`, TTL).
 
@@ -92,7 +101,8 @@ export interface FrogInterventionPayload {
   trigger: BurnoutTrigger;
   severity: 'low' | 'medium' | 'high';
   message: string;
-  suggestedAction: 'belly_breathe' | 'visual_grounding';
+  suggestedAction:
+    | 'belly_breathe' | 'visual_grounding' | 'task_intent' | 'mindful_pause';
   activeApp?: string;
 }
 ```
@@ -103,7 +113,7 @@ Emitted on the `trigger-intervention` Tauri event; bubbles hold for
 ## Status
 
 - All seven triggers verified end-to-end against the live app (real injection + Gemini).
-- 40 Rust unit tests passing; `tsc --noEmit` and `vite build` clean.
+- 47 Rust unit tests passing; `tsc --noEmit` and `vite build` clean.
 - Fast-test env overrides: `FROG_EVAL_SECS`, `FROG_IDLE_FREEZE_SECS`,
   `FROG_FORCE_TRIGGER` (see `handoff.md`).
 - Pre-ship cleanup: remove debug `eprintln!` tick/emit logs and the `FROG_FORCE_TRIGGER` hook.

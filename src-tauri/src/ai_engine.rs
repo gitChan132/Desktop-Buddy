@@ -109,7 +109,7 @@ pub struct FrogInterventionPayload {
     /// One of `low`, `medium`, `high`.
     pub severity: String,
     pub message: String,
-    /// One of `belly_breathe`, `visual_grounding`.
+    /// One of `belly_breathe`, `visual_grounding`, `task_intent`, `mindful_pause`.
     pub suggested_action: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_app: Option<String>,
@@ -219,7 +219,7 @@ fn build_intervention(
                 "*ribbit* {} window switches in 20 seconds. Your focus is doing laps. One lily pad at a time.",
                 windows.switches_in_window
             ),
-            "visual_grounding",
+            "task_intent",
         )
     } else if windows.idle_freeze {
         (
@@ -299,7 +299,6 @@ fn detection_detail(
 #[serde(rename_all = "camelCase")]
 struct LlmReply {
     message: String,
-    suggested_action: String,
 }
 
 fn cooldown() -> &'static Mutex<Option<Instant>> {
@@ -316,15 +315,42 @@ fn cooldown() -> &'static Mutex<Option<Instant>> {
 //         .unwrap_or(INTERVENTION_COOLDOWN)
 // }
 
-fn suggested_action_for(trigger: &str) -> &'static str {
+/// Activities that suit a trigger, most apt first. The first is the
+/// deterministic fallback; at fire time one of them is chosen at random.
+fn suggested_actions_for(trigger: &str) -> &'static [&'static str] {
     match trigger {
-        "tab_thrashing" | "idle_freeze" | "doomscroll" => "visual_grounding",
-        _ => "belly_breathe",
+        "backspace_loop" | "frantic_typing" => &["belly_breathe", "mindful_pause"],
+        "cursor_hesitation" | "cursor_oscillation" => {
+            &["belly_breathe", "mindful_pause", "task_intent"]
+        }
+        "tab_thrashing" => &["task_intent", "mindful_pause", "visual_grounding"],
+        "idle_freeze" => &["visual_grounding", "mindful_pause", "task_intent"],
+        "doomscroll" => &["visual_grounding", "mindful_pause"],
+        _ => &["belly_breathe"],
     }
 }
 
+/// Most apt activity for the trigger (kept deterministic for tests).
+fn suggested_action_for(trigger: &str) -> &'static str {
+    suggested_actions_for(trigger)[0]
+}
+
+/// Picks one of the trigger's apt activities. Varies per intervention using
+/// sub-second wall-clock entropy, so no extra RNG dependency is needed.
+fn pick_suggested_action(trigger: &str) -> &'static str {
+    let actions = suggested_actions_for(trigger);
+    if actions.len() == 1 {
+        return actions[0];
+    }
+    let seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.subsec_nanos() as usize)
+        .unwrap_or(0);
+    actions[seed % actions.len()]
+}
+
 /// Reads `GEMINI_API_KEY`, loading `.env.local` when the app was started without it.
-fn api_key() -> Option<String> {
+pub(crate) fn api_key() -> Option<String> {
     if let Ok(key) = std::env::var("GEMINI_API_KEY") {
         return Some(key);
     }
@@ -373,7 +399,12 @@ Tell them plainly to close the feed, in one short sentence, still with a little 
                     "message": { "type": "STRING" },
                     "suggestedAction": {
                         "type": "STRING",
-                        "enum": ["belly_breathe", "visual_grounding"]
+                        "enum": [
+                            "belly_breathe",
+                            "visual_grounding",
+                            "task_intent",
+                            "mindful_pause"
+                        ]
                     }
                 },
                 "required": ["message", "suggestedAction"]
@@ -447,11 +478,9 @@ pub async fn trigger_frog_intervention(
     match ask_llm(&trigger, &window_title, &detected).await {
         Ok(reply) => {
             payload.message = reply.message;
-            // The trigger→activity mapping wins for doomscroll so the eyes-off-screen
-            // guide always opens; other triggers let the model pick its soothing action.
-            if trigger != "doomscroll" {
-                payload.suggested_action = reply.suggested_action;
-            }
+            // The trigger→activity mapping is authoritative: each activity has its
+            // own detection signal, so the model only writes the copy.
+            payload.suggested_action = pick_suggested_action(&trigger).to_string();
         }
         Err(error) => {
             eprintln!("[ai_engine] intervention LLM unavailable, using fallback: {error}");
@@ -642,7 +671,7 @@ mod tests {
         };
         let payload = build_intervention(&TypingSnapshot::default(), &windows, &ScrollSnapshot::default()).unwrap();
         assert_eq!(payload.trigger, "tab_thrashing");
-        assert_eq!(payload.suggested_action, "visual_grounding");
+        assert_eq!(payload.suggested_action, "task_intent");
     }
 
     #[test]
@@ -687,10 +716,37 @@ mod tests {
         assert_eq!(suggested_action_for("frantic_typing"), "belly_breathe");
         assert_eq!(suggested_action_for("cursor_hesitation"), "belly_breathe");
         assert_eq!(suggested_action_for("cursor_oscillation"), "belly_breathe");
-        assert_eq!(suggested_action_for("tab_thrashing"), "visual_grounding");
+        assert_eq!(suggested_action_for("tab_thrashing"), "task_intent");
         assert_eq!(suggested_action_for("idle_freeze"), "visual_grounding");
         assert_eq!(suggested_action_for("doomscroll"), "visual_grounding");
         assert_eq!(suggested_action_for("unknown"), "belly_breathe");
+    }
+
+    #[test]
+    fn every_ranked_action_list_is_apt_and_in_bounds() {
+        let known = [
+            "backspace_loop",
+            "frantic_typing",
+            "cursor_hesitation",
+            "cursor_oscillation",
+            "tab_thrashing",
+            "idle_freeze",
+            "doomscroll",
+        ];
+        let valid = ["belly_breathe", "visual_grounding", "task_intent", "mindful_pause"];
+        for trigger in known {
+            let actions = suggested_actions_for(trigger);
+            assert!(!actions.is_empty(), "{trigger} needs at least one action");
+            assert!(
+                actions.iter().all(|action| valid.contains(action)),
+                "{trigger} lists an unknown action"
+            );
+        }
+        // Repeated picks always land inside the trigger's ranked list.
+        for _ in 0..20 {
+            let picked = pick_suggested_action("tab_thrashing");
+            assert!(suggested_actions_for("tab_thrashing").contains(&picked));
+        }
     }
 
     #[test]
@@ -861,7 +917,7 @@ mod tests {
             ["suggestedAction"]["enum"]
             .as_array()
             .unwrap();
-        assert_eq!(actions.len(), 2);
+        assert_eq!(actions.len(), 4);
     }
 
     #[test]
