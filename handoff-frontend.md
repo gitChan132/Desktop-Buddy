@@ -54,7 +54,9 @@ thing; the rest of the window is click-through) that:
 | `src/components/FeelingFrog.tsx` | Character rig: sprite animation, drag/carry, throw physics, intervention bubble, click-to-open |
 | `src/components/BreatheAlong.tsx` | Guided breathing bubble above the frog (bar, lines, phase chip, croak sound) |
 | `src/breathing.ts` | Shared breath phases (3s inhale / 3s hold / 5s exhale) used by both the guide and the sprite |
+| `src/components/SettingsPond.tsx` | Pond-themed settings window (tray → "Pond settings"): status HUD, frog hop-in, lilypad toggles |
 | `src/assets/frog/green_spritesheet.png` | The green sprite sheet (16×16 grid of 32px cells) |
+| `src/assets/frog/lilypad-pond.jpg` | Pixel pond background for the settings window |
 | `src/assets/fonts/vt323.woff2` | Bundled retro dialogue font (VT323, OFL) — no network needed at runtime |
 | `src/styles.css` | Base styles + `.pixel-panel` / `.pixel-chip` / `.pixel-button` / `.pixel-bar` / `.pixel-tail` |
 | `src-tauri/src/telemetry.rs` | Emits `cursor-pos`, `pond-stress`, and `pointer-release` (see §5) |
@@ -175,6 +177,26 @@ The font lives at `src/assets/fonts/vt323.woff2` (bundled by Vite), so the
 overlay never needs the network. Change the palette in one place: the greens are
 literal hex values in those classes and match the sprite (`#0b3a1f` ink,
 `#e9fbe2` paper).
+
+### Pond settings window
+
+- Tray menu → **Pond settings** (or left-clicking the tray icon) toggles the
+  second window, id `panel`, 760×540 CSS, transparent.
+- Showing the panel hides the frog overlay (it is always-on-top and would cover
+  the pond) and raises the panel always-on-top; hiding it ("Back to desktop",
+  Escape, or the tray toggle) restores the frog.
+- `SettingsPond.tsx` draws the lilypad background, the left status HUD and three
+  lilypad buttons (pause nudges, croak sounds, back to desktop).
+- Stats come from the `frog_stats` command, polled every 2 s: anxiety is the pond
+  stress score; focus is `1 − (0.6 × switch pressure + 0.4 if on a feed)`; the
+  HUD also lists keys, backspaces, switches, hesitation, reversals, scrolls,
+  feed time, idle time and the app in front. History drives the pixel sparklines.
+- On open the panel replays the hop: `pond-panel-shown` triggers a fetch of
+  `frog_anchor` (the frog's current screen point), converts it to panel-local CSS
+  and animates an arc onto a lilypad.
+- `FROG_OPEN_PANEL=1` opens the panel at startup for demos/testing.
+
+The old `ControlPanel.tsx` popover was replaced by `SettingsPond.tsx`.
 
 ---
 

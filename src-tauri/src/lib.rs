@@ -19,6 +19,8 @@ const TRAY_GAP: i32 = 8;
 const TRAY_ID: &str = "frog-tray";
 const PANEL_LABEL: &str = "panel";
 const SETTINGS_EVENT: &str = "frog-settings";
+/// Fired when the pond panel is shown so the frog can hop in again.
+const PANEL_OPENED_EVENT: &str = "pond-panel-shown";
 
 /// Holds the tray menu so the check marks can be synced from commands.
 struct TrayMenu(tauri::menu::Menu<tauri::Wry>);
@@ -79,7 +81,7 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
     let menu = Menu::with_items(
         app,
         &[
-            &MenuItem::with_id(app, "panel", "Control panel", true, None::<&str>)?,
+            &MenuItem::with_id(app, "panel", "Pond settings", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &CheckMenuItem::with_id(
                 app,
@@ -141,21 +143,35 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Keeps the frog window in step with the settings window: the overlay is
+/// always-on-top, so it has to step aside while the panel is up.
+fn set_main_visible(app: &AppHandle, visible: bool) {
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = if visible { main.show() } else { main.hide() };
+    }
+}
+
 /// Opens or hides the control panel, anchoring it near the clicked tray icon.
 fn toggle_panel(app: &AppHandle, cursor: Option<PhysicalPosition<f64>>) {
     let Some(panel) = app.get_webview_window(PANEL_LABEL) else {
         return;
     };
     if panel.is_visible().unwrap_or(false) {
+        let _ = panel.set_always_on_top(false);
         let _ = panel.hide();
+        set_main_visible(app, true);
         return;
     }
     match cursor {
         Some(cursor) => position_panel_near(&panel, cursor),
         None => position_panel_default(&panel),
     }
+    set_main_visible(app, false);
+    // Other apps (or the frog) must not cover the pond while it is open.
+    let _ = panel.set_always_on_top(true);
     let _ = panel.show();
     let _ = panel.set_focus();
+    let _ = app.emit(PANEL_OPENED_EVENT, ());
 }
 
 /// Places the panel under a top tray icon (macOS menu bar) or above a bottom
@@ -264,6 +280,86 @@ fn set_sound_volume(app: AppHandle, volume: f32) {
 fn quit_app(app: AppHandle) {
     app.exit(0);
 }
+
+/// Snapshot for the pond panel's status column.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FrogStats {
+    stress: f32,
+    focus: f32,
+    keys: usize,
+    backspaces: usize,
+    switches: usize,
+    hesitant_clicks: usize,
+    reversals: usize,
+    scrolls_30s: usize,
+    on_feed: bool,
+    feed_seconds: u64,
+    seconds_since_input: u64,
+    active_app: Option<String>,
+    nudges_paused: bool,
+    sound_enabled: bool,
+}
+
+#[tauri::command]
+fn frog_stats() -> FrogStats {
+    let typing = telemetry::snapshot();
+    let windows = window_tracker::snapshot();
+    let scrolls = telemetry::scroll_snapshot();
+
+    // Focus proxy: many site/app switches or sitting in a feed means attention is
+    // scattered; calm, single-window work keeps it near 1.0.
+    let switch_pressure = (windows.switches_in_window as f32 / 5.0).clamp(0.0, 1.0);
+    let distraction = switch_pressure * 0.6 + if windows.on_feed { 0.4 } else { 0.0 };
+
+    FrogStats {
+        stress: telemetry::pond_stress(),
+        focus: (1.0 - distraction).clamp(0.0, 1.0),
+        keys: typing.keys_in_window,
+        backspaces: typing.backspaces_in_window,
+        switches: windows.switches_in_window,
+        hesitant_clicks: windows.hesitant_clicks,
+        reversals: windows.direction_reversals,
+        scrolls_30s: scrolls.scrolls_in_30s,
+        on_feed: windows.on_feed,
+        feed_seconds: windows.feed_seconds,
+        seconds_since_input: telemetry::seconds_since_last_input(),
+        active_app: windows.active_app.as_ref().map(|app| app.app_name.clone()),
+        nudges_paused: settings::nudges_paused(),
+        sound_enabled: settings::sound_enabled(),
+    }
+}
+
+/// Where the frog currently sits on screen (physical px), so the panel can start
+/// his hop from the right place.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FrogAnchor {
+    x: f64,
+    y: f64,
+}
+
+#[tauri::command]
+fn frog_anchor(app: AppHandle) -> Option<FrogAnchor> {
+    let main = app.get_webview_window("main")?;
+    let position = main.outer_position().ok()?;
+    let size = main.outer_size().ok()?;
+    Some(FrogAnchor {
+        // Centre of the visible frog, roughly 78% down the window.
+        x: position.x as f64 + size.width as f64 / 2.0,
+        y: position.y as f64 + size.height as f64 * 0.78,
+    })
+}
+
+/// Closes the panel and brings the frog back to the desktop.
+#[tauri::command]
+fn hide_panel(app: AppHandle) {
+    if let Some(panel) = app.get_webview_window(PANEL_LABEL) {
+        let _ = panel.set_always_on_top(false);
+        let _ = panel.hide();
+    }
+    set_main_visible(&app, true);
+}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -274,7 +370,10 @@ pub fn run() {
             set_nudges_paused,
             set_sound_enabled,
             set_sound_volume,
-            quit_app
+            quit_app,
+            frog_stats,
+            frog_anchor,
+            hide_panel
         ])
         .setup(|app| {
             // macOS: live only in the menu bar — no Dock tile, no Cmd-Tab entry.
@@ -312,6 +411,10 @@ pub fn run() {
                 // Setting the level/behavior above can order the panel in on
                 // some macOS versions; keep it hidden until the tray toggles it.
                 panel.hide()?;
+            }
+            // Dev/demo hook: open the pond panel straight away.
+            if std::env::var("FROG_OPEN_PANEL").is_ok() {
+                toggle_panel(app.handle(), None);
             }
             Ok(())
         })
