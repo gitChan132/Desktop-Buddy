@@ -10,12 +10,21 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "desktop-buddy",
-        "width": 800,
-        "height": 600
+        "label": "main",
+        "title": "Feeling Frog",
+        "width": 340,
+        "height": 420,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "backgroundColor": "#00000000"
       }
     ],
     "security": {
