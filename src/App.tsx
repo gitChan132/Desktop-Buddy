@@ -1,8 +1,8 @@
 import { listen } from "@tauri-apps/api/event";
 import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
+import { BreatheAlong } from "./components/BreatheAlong";
 import { FeelingFrog, type FrogMood } from "./components/FeelingFrog";
-import { LilyPadGrounding } from "./components/LilyPadGrounding";
 import type { FrogInterventionPayload } from "./types";
 
 // Region (logical px, anchored bottom-center) where the frog is clickable.
@@ -56,9 +56,9 @@ function useClickThroughHitbox(forceInteractive: boolean) {
 export default function App() {
   const [intervention, setIntervention] =
     useState<FrogInterventionPayload | null>(null);
-  const [groundingOpen, setGroundingOpen] = useState(false);
+  const [breathingOpen, setBreathingOpen] = useState(false);
 
-  useClickThroughHitbox(groundingOpen);
+  useClickThroughHitbox(breathingOpen);
 
   useEffect(() => {
     const unlisten = listen<FrogInterventionPayload>(
@@ -70,10 +70,14 @@ export default function App() {
     };
   }, []);
 
-  const mood: FrogMood = groundingOpen ? "breathing" : intervention ? "curious" : "idle";
+  const mood: FrogMood = breathingOpen
+    ? "croaking"
+    : intervention
+      ? "curious"
+      : "idle";
 
-  const closeGrounding = () => {
-    setGroundingOpen(false);
+  const closeBreathing = () => {
+    setBreathingOpen(false);
     setIntervention(null);
   };
 
@@ -82,13 +86,9 @@ export default function App() {
       <FeelingFrog
         mood={mood}
         intervention={intervention}
-        onGrounding={() => setGroundingOpen(true)}
+        onGrounding={() => setBreathingOpen(true)}
       />
-      <LilyPadGrounding
-        open={groundingOpen}
-        suggestedAction={intervention?.suggestedAction ?? "belly_breathe"}
-        onClose={closeGrounding}
-      />
+      <BreatheAlong open={breathingOpen} onClose={closeBreathing} />
     </div>
   );
 }

@@ -57,7 +57,7 @@ const THROW_SAMPLE_WINDOW = 110;
 /** Same breathing room from the screen edges as the startup placement. */
 const THROW_EDGE_MARGIN = 12;
 
-export type FrogMood = "idle" | "curious" | "breathing";
+export type FrogMood = "idle" | "curious" | "croaking";
 
 interface FeelingFrogProps {
   mood: FrogMood;
@@ -376,7 +376,7 @@ export function FeelingFrog({
     const wasDragged = drag.current?.moved ?? false;
     drag.current = null;
     setHeld(false);
-    if (wasDragged) return; // A drag must not trigger the breathing panel.
+    if (wasDragged) return; // A drag must not trigger the croak-along.
     onGrounding();
   };
 
@@ -391,14 +391,11 @@ export function FeelingFrog({
     });
   }, [intervention, hop]);
 
-  const breathing = mood === "breathing";
-  const animation: AnimationName = breathing
-    ? "idle"
-    : mood === "curious"
-      ? "croak"
-      : "idle";
-  // Breathing slows the idle loop right down to match the 7s breath cycle.
-  const framesPerSecond = breathing ? 3 : mood === "curious" ? 8 : 6;
+  const croaking = mood === "croaking";
+  const curious = mood === "curious";
+  // Croaking along runs slow and deliberate; curiosity is a quicker riff.
+  const animation: AnimationName = croaking || curious ? "croak" : "idle";
+  const framesPerSecond = croaking ? 2.5 : curious ? 8 : 6;
   const frame = useSpriteFrame(animation, framesPerSecond);
 
   // Carried and airborne poses come from fixed frames rather than the mood
@@ -422,7 +419,7 @@ export function FeelingFrog({
     <div className="relative h-full w-full">
       <div className="absolute inset-x-0 bottom-[calc(0.75rem+192px)] flex justify-center">
         <AnimatePresence>
-          {intervention && !breathing && (
+          {intervention && !croaking && (
             <motion.div
               key={intervention.id}
               data-interactive
@@ -445,7 +442,7 @@ export function FeelingFrog({
       <motion.button
         type="button"
         data-interactive
-        aria-label="Drag to reposition the frog, click for the lily pad breathing guide"
+        aria-label="Drag to reposition the frog, click to croak along"
         onClick={handleClick}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
