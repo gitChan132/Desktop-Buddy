@@ -20,7 +20,7 @@ fn evaluation_interval() -> Duration {
         .unwrap_or(EVALUATION_INTERVAL)
 }
 /// Don't nudge the user more often than this.
-const INTERVENTION_COOLDOWN: Duration = Duration::from_secs(5 * 60);
+const INTERVENTION_COOLDOWN: Duration = Duration::from_secs(45);
 
 /// Doomscroll gate: minutes on one feed window, and wheel events in the last
 /// 90 seconds. Both have env overrides for fast e2e checks.

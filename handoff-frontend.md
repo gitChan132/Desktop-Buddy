@@ -221,7 +221,7 @@ opens `VisualGrounding.tsx` (~29s eyes-off-screen exercise) for
   segment). Switching between YouTube tabs, or Instagram tabs, is a *content
   flip*, not a window switch; only moving between different sites counts.
 - Evaluation runs every 10 s, so the Shorts rule lands roughly 30–40 s after the
-  window takes focus. The 5-minute intervention cooldown still applies.
+  window takes focus. The 45-second intervention cooldown still applies.
 - Demo/test overrides: `FROG_DOOMSCROLL_SECS`, `FROG_DOOMSCROLL_SCROLLS`,
   `FROG_SHORTS_SECS`, `FROG_SHORTS_SCROLLS` (alongside `FROG_EVAL_SECS`).
 - Frontend: `App` maps `trigger === "doomscroll"` to the `grumpy` mood;

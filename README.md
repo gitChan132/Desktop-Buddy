@@ -21,7 +21,7 @@ glassmorphic speech bubble and auto-dismiss after 10 seconds.
 
 Each intervention's copy comes from Gemini (`gemini-2.5-flash` by default) with a
 deterministic fallback. Only timing metadata and the active window title ever leave the
-machine — no key contents, text, or screenshots. Nudges are throttled to one per 5 minutes.
+machine — no key contents, text, or screenshots. Nudges are throttled to one per 45 seconds.
 
 See [`scope.md`](scope.md) for the full product scope and [`handoff.md`](handoff.md) for
 current state and dev notes.

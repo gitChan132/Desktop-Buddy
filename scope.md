@@ -14,7 +14,7 @@ bottom-right of the screen.
 2. **Context-aware AI interventions** — when a signal crosses threshold the engine asks
    Gemini (`gemini-2.5-flash`) for one warm, frog-flavoured sentence that names the exact
    signal (e.g. "40 backspaces?"). Deterministic fallback copy is used if the model or key is
-   unavailable. Each nudge fires once per 5 minutes per process.
+   unavailable. Each nudge fires once per 45 seconds per process.
 3. **Kinetic overlay** — transparent, frameless, always-on-top window with a click-through
    hitbox. Spring-physics frog, draggable/carryable, glassmorphic speech bubble that
    auto-dismisses after 10s, and a guided breathing modal with a Web Audio chime.

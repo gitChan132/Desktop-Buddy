@@ -32,8 +32,8 @@ tab_thrashing → idle_freeze.
 ### Timers & thresholds
 - Telemetry window 30s; stress score refreshed every 5s; cursor events throttled to 20 Hz.
 - Backspace streak ends after 5s of no backspace. Thrash window 20s, polled every 2s.
-- Idle freeze default **150s (2.5 min)**. Evaluation loop every **20s**. Intervention
-  cooldown **5 min per process** → one nudge per app run; restart between e2e tests.
+- Idle freeze default **150s (2.5 min)**. Evaluation loop every **10s**. Intervention
+  cooldown **45s per process** → one nudge per app run; restart between e2e tests.
 - Stress weights: keys .25, backspaces .15, velocity .15, jitter .10, hesitation .15,
   oscillation .20.
 
