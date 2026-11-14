@@ -54,8 +54,16 @@ const THROW_MAX_SPEED = 4200;
 const THROW_SETTLE_SPEED = 40;
 /** Only pointer samples this recent (ms) contribute to release velocity. */
 const THROW_SAMPLE_WINDOW = 110;
-/** Same breathing room from the screen edges as the startup placement. */
-const THROW_EDGE_MARGIN = 12;
+
+/**
+ * The frog's visible pixels inside one 32px sprite cell, covering both the
+ * airborne and seated poses. Collisions use this instead of the window box:
+ * the window is 340x420 with the sprite in a small patch at the bottom, so
+ * bounding the window would bounce him off a wall of empty space.
+ */
+const SPRITE_BOX = { left: 7, top: 11, right: 25, bottom: 31 };
+/** The sprite button sits `bottom-3` above the window's bottom edge. */
+const FROG_BOTTOM_INSET = 12;
 
 export type FrogMood = "idle" | "curious" | "croaking";
 
@@ -186,10 +194,21 @@ export function FeelingFrog({
     const areaRight = areaLeft + (area.availWidth || area.width) * scale;
     const areaBottom = areaTop + (area.availHeight || area.height) * scale;
 
-    const minX = areaLeft + THROW_EDGE_MARGIN;
-    const minY = areaTop + THROW_EDGE_MARGIN;
-    const maxX = Math.max(minX, areaRight - size.width - THROW_EDGE_MARGIN);
-    const maxY = Math.max(minY, areaBottom - size.height - THROW_EDGE_MARGIN);
+    // Bounce the frog's visible body, not the transparent window box, so he
+    // only stops at the actual screen edges.
+    const cssWidth = size.width / scale;
+    const cssHeight = size.height / scale;
+    const buttonLeft = (cssWidth - RENDER_SIZE) / 2;
+    const buttonTop = cssHeight - FROG_BOTTOM_INSET - RENDER_SIZE;
+    const artLeft = (buttonLeft + RENDER_SIZE * (SPRITE_BOX.left / 32)) * scale;
+    const artTop = (buttonTop + RENDER_SIZE * (SPRITE_BOX.top / 32)) * scale;
+    const artRight = (buttonLeft + RENDER_SIZE * (SPRITE_BOX.right / 32)) * scale;
+    const artBottom = (buttonTop + RENDER_SIZE * (SPRITE_BOX.bottom / 32)) * scale;
+
+    const minX = areaLeft - artLeft;
+    const minY = areaTop - artTop;
+    const maxX = Math.max(minX, areaRight - artRight);
+    const maxY = Math.max(minY, areaBottom - artBottom);
     let x = position.x;
     let y = position.y;
 
