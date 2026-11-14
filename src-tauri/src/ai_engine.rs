@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use crate::telemetry::{self, TypingSnapshot};
+use crate::telemetry::{self, PointerSnapshot, TypingSnapshot};
 use crate::window_tracker::{self, WindowSnapshot};
 
 const EVALUATION_INTERVAL: Duration = Duration::from_secs(20);
@@ -29,16 +29,6 @@ pub struct FrogInterventionPayload {
     pub active_app: Option<String>,
 }
 
-/// Deterministic 0–100 stress score from the telemetry snapshots.
-pub fn stress_score(typing: &TypingSnapshot, windows: &WindowSnapshot) -> u8 {
-    let typing_pressure = (typing.keys_in_window as f32 / 60.0).min(1.0);
-    let backspace_pressure = (typing.backspaces_in_window as f32 / 8.0).min(1.0);
-    let thrash_pressure = (windows.switches_in_window as f32 / 6.0).min(1.0);
-
-    ((typing_pressure * 35.0) + (backspace_pressure * 35.0) + (thrash_pressure * 30.0))
-        .round() as u8
-}
-
 fn severity_for(score: u8) -> &'static str {
     if score >= 70 {
         "high"
@@ -59,21 +49,25 @@ fn next_id() -> String {
 
 fn build_intervention(
     typing: &TypingSnapshot,
+    pointer: &PointerSnapshot,
     windows: &WindowSnapshot,
 ) -> Option<FrogInterventionPayload> {
-    let score = stress_score(typing, windows);
+    // Normalized 0.0..=1.0 score computed by the telemetry engine.
+    let score = (telemetry::pond_stress() * 100.0).round() as u8;
     let active_app = windows.active_app.as_ref().map(|app| app.app_name.clone());
 
-    let (trigger, message, suggested_action) = if typing.backspaces_in_window >= 8 {
+    let (trigger, message, suggested_action) = if typing.backspaces_in_window >= 24
+        || typing.backspace_streak >= 6
+    {
         (
             "backspace_loop",
             format!(
-                "*ribbit* You've hit backspace {} times in the last 10 seconds. The sentence will still be there. Let's pause on the lily pad.",
+                "*ribbit* You've hit backspace {} times in the last 30 seconds. The sentence will still be there. Let's pause on the lily pad.",
                 typing.backspaces_in_window
             ),
             "belly_breathe",
         )
-    } else if typing.keys_in_window >= 60 {
+    } else if typing.keys_in_window >= 180 {
         (
             "frantic_typing",
             "*ribbit* Your keys are hopping faster than me. Let's slow the pond down for one breath.".to_string(),
@@ -85,7 +79,9 @@ fn build_intervention(
             "*ribbit* Six app switches in a minute. Your focus is doing laps. One lily pad at a time.".to_string(),
             "lily_pad_step",
         )
-    } else if typing.seconds_since_last_key.is_some_and(|secs| secs >= 120) {
+    } else if typing.seconds_since_last_key.is_some_and(|secs| secs >= 120)
+        && pointer.seconds_since_motion.is_none_or(|secs| secs >= 120)
+    {
         (
             "idle_freeze",
             "*ribbit* You've been still for a while. Stretch your legs and let the pond settle.".to_string(),
@@ -139,8 +135,9 @@ pub fn start(app: AppHandle) {
             std::thread::sleep(EVALUATION_INTERVAL);
 
             let typing = telemetry::snapshot();
+            let pointer = telemetry::pointer_snapshot();
             let windows = window_tracker::snapshot();
-            let Some(payload) = build_intervention(&typing, &windows) else {
+            let Some(payload) = build_intervention(&typing, &pointer, &windows) else {
                 continue;
             };
 

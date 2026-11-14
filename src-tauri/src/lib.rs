@@ -7,7 +7,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            telemetry::start();
+            telemetry::start(app.handle().clone());
             window_tracker::start();
             ai_engine::start(app.handle().clone());
             Ok(())
