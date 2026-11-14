@@ -220,9 +220,15 @@ may still be loading when the request fires; `open_pond` also emits
   stress score; focus is `1 − (0.6 × switch pressure + 0.4 if on a feed)`; the
   HUD also lists keys, backspaces, switches, hesitation, reversals, scrolls,
   feed time, idle time and the app in front. History drives the pixel sparklines.
-- On open the panel replays the hop: `frog_anchor` gives the frog's current
-  screen point, converted to pond-local CSS, and framer animates an arc onto a
-  lilypad.
+- On open the panel does not hide the frog straight away: it leaves him on the
+  desktop for **one second**, then calls `hide_frog_overlay` and plays an
+  entrance. The sheet's rows are eight facings (row 0 front, row 4 back,
+  1–3/5–7 in between), so he turns away in the direction of the lilypad (rows
+  1–4 when it is to his right, 7–4 when it is to his left), jumps with the jump
+  row facing away, lands on the pad facing away, then turns back to face the
+  viewer. `frog_anchor` gives his current screen point, clamped to the pond edge
+  so the turn is visible. A `showSeq` counter from `pond_tab` starts the
+  entrance reliably even if the webview misses the open event.
 - `FROG_OPEN_PANEL=1` opens the popover at launch and `FROG_OPEN_POND=1` opens
   the pond directly, both for demos/testing.
 

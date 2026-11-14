@@ -380,6 +380,7 @@ fn frog_anchor(app: AppHandle) -> Option<FrogAnchor> {
 /// pond can notice repeat requests even when the tab is unchanged.
 static POND_TAB: Mutex<String> = Mutex::new(String::new());
 static POND_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static POND_SHOW_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn set_pond_tab(tab: &str) {
     if let Ok(mut current) = POND_TAB.lock() {
@@ -394,6 +395,7 @@ fn set_pond_tab(tab: &str) {
 struct PondTab {
     tab: String,
     seq: u64,
+    show_seq: u64,
 }
 
 #[tauri::command]
@@ -404,6 +406,7 @@ fn pond_tab() -> PondTab {
             .map(|tab| tab.clone())
             .unwrap_or_else(|_| "status".to_string()),
         seq: POND_SEQ.load(std::sync::atomic::Ordering::Relaxed),
+        show_seq: POND_SHOW_SEQ.load(std::sync::atomic::Ordering::Relaxed),
     }
 }
 
@@ -417,13 +420,25 @@ fn open_pond(app: AppHandle, tab: Option<String>) {
     let Some(pond) = app.get_webview_window(POND_LABEL) else {
         return;
     };
-    set_main_visible(&app, false);
     position_pond_center(&pond);
     let _ = pond.show();
     let _ = pond.set_focus();
     let tab = tab.unwrap_or_else(|| "status".to_string());
     set_pond_tab(&tab);
+    POND_SHOW_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let _ = app.emit(PANEL_OPENED_EVENT, tab);
+}
+
+/// Called by the pond after it has let the frog sit on the desktop for a beat.
+/// Only hides him when the pond is actually visible, so a close during the
+/// delay cannot leave the frog invisible.
+#[tauri::command]
+fn hide_frog_overlay(app: AppHandle) {
+    if let Some(pond) = app.get_webview_window(POND_LABEL) {
+        if pond.is_visible().unwrap_or(false) {
+            set_main_visible(&app, false);
+        }
+    }
 }
 
 /// Closes the pond and brings the frog back to the desktop.
@@ -464,6 +479,7 @@ pub fn run() {
             frog_anchor,
             open_pond,
             hide_pond,
+            hide_frog_overlay,
             pond_tab
         ])
         .setup(|app| {
