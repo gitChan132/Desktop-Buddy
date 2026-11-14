@@ -25,8 +25,37 @@ const CROWN_Y = 13 / 32;
 const HELD_FRAMES = [1, 2];
 const HELD_FRAMES_PER_SECOND = 2;
 
+/**
+ * Airborne poses. Shock frame 1 is the one with wide, startled eyes and a
+ * fully stretched body; jump frame 2 is the longest jump stretch. He holds
+ * the wide-eyed pose and only briefly flexes into the jump stretch, so a
+ * throw reads as one stiff startled arc instead of a fast animation loop.
+ * `hold` is how long that pose stays up, in ms.
+ */
+const FLIGHT_FRAMES = [
+  { column: 1, row: 8, hold: 1400 },
+  { column: 10, row: 0, hold: 420 },
+];
+
 /** Pointer travel (CSS px) before a press is treated as a drag instead of a click. */
 const DRAG_THRESHOLD = 4;
+
+// Throw physics, in physical pixels and seconds.
+/** Downward pull so a thrown frog arcs back to the desktop. */
+const THROW_GRAVITY = 2600;
+/** Exponential air drag; higher stops him sooner. */
+const THROW_AIR_DRAG = 1.1;
+/** Speed kept after hitting a screen edge. */
+const THROW_BOUNCE_X = 0.55;
+const THROW_BOUNCE_Y = 0.45;
+/** Clamp on release speed, and the speed at which he is considered parked. */
+const THROW_MAX_SPEED = 4200;
+const THROW_MIN_SPEED = 60;
+const THROW_SETTLE_SPEED = 40;
+/** Only pointer samples this recent (ms) contribute to release velocity. */
+const THROW_SAMPLE_WINDOW = 110;
+/** Same breathing room from the screen edges as the startup placement. */
+const THROW_EDGE_MARGIN = 12;
 
 export type FrogMood = "idle" | "curious" | "breathing";
 
@@ -93,6 +122,127 @@ export function FeelingFrog({
   // frog. Held frogs pose in full extension instead of looping an animation.
   const [held, setHeld] = useState(false);
   const [heldPose, setHeldPose] = useState(0);
+  // True while he is sailing through the air after being thrown.
+  const [flying, setFlying] = useState(false);
+  const [flightPose, setFlightPose] = useState(0);
+  const [tilt, setTilt] = useState(0);
+
+  // Pointer samples (physical px, DOM timestamp) used to work out how fast he
+  // was moving when released.
+  const samples = useRef<{ t: number; x: number; y: number }[]>([]);
+  const flightFrame = useRef<number | null>(null);
+
+  const stopFlight = () => {
+    if (flightFrame.current !== null) {
+      cancelAnimationFrame(flightFrame.current);
+      flightFrame.current = null;
+    }
+    setFlying(false);
+    setTilt(0);
+  };
+
+  // Drop any in-flight animation when the component unmounts.
+  useEffect(() => stopFlight, []);
+
+  /** Throws the window along the sampled release velocity until it settles. */
+  const throwFrog = async (recent: { t: number; x: number; y: number }[]) => {
+    if (recent.length < 2) return;
+
+    const first = recent[0];
+    const last = recent[recent.length - 1];
+    const seconds = (last.t - first.t) / 1000;
+    if (seconds <= 0) return;
+
+    let vx = (last.x - first.x) / seconds;
+    let vy = (last.y - first.y) / seconds;
+    const speed = Math.hypot(vx, vy);
+    if (speed < THROW_MIN_SPEED) return;
+    if (speed > THROW_MAX_SPEED) {
+      vx *= THROW_MAX_SPEED / speed;
+      vy *= THROW_MAX_SPEED / speed;
+    }
+
+    const win = getCurrentWindow();
+    let position, size, scale;
+    try {
+      [position, size, scale] = await Promise.all([
+        win.outerPosition(),
+        win.outerSize(),
+        win.scaleFactor(),
+      ]);
+    } catch {
+      return; // Window APIs unavailable (plain browser dev).
+    }
+
+    // Work area in physical px, so he lands on the desktop rather than under
+    // the taskbar. `screen` reports CSS px, hence the scale factor.
+    const area = screen as Screen & { availLeft?: number; availTop?: number };
+    const areaLeft = (area.availLeft ?? 0) * scale;
+    const areaTop = (area.availTop ?? 0) * scale;
+    const areaRight = areaLeft + (area.availWidth || area.width) * scale;
+    const areaBottom = areaTop + (area.availHeight || area.height) * scale;
+
+    const minX = areaLeft + THROW_EDGE_MARGIN;
+    const minY = areaTop + THROW_EDGE_MARGIN;
+    const maxX = Math.max(minX, areaRight - size.width - THROW_EDGE_MARGIN);
+    const maxY = Math.max(minY, areaBottom - size.height - THROW_EDGE_MARGIN);
+    let x = position.x;
+    let y = position.y;
+
+    setFlying(true);
+    setHeld(false);
+    let previous = performance.now();
+    const startedAt = previous;
+
+    const step = (now: number) => {
+      const dt = Math.min((now - previous) / 1000, 0.05);
+      previous = now;
+
+      vy += THROW_GRAVITY * dt;
+      const drag = Math.exp(-THROW_AIR_DRAG * dt);
+      vx *= drag;
+      vy *= drag;
+
+      x += vx * dt;
+      y += vy * dt;
+
+      if (x < minX) {
+        x = minX;
+        vx = Math.abs(vx) * THROW_BOUNCE_X;
+      } else if (x > maxX) {
+        x = maxX;
+        vx = -Math.abs(vx) * THROW_BOUNCE_X;
+      }
+
+      if (y < minY) {
+        y = minY;
+        vy = Math.abs(vy) * THROW_BOUNCE_Y;
+      } else if (y >= maxY) {
+        y = maxY;
+        vy = -Math.abs(vy) * THROW_BOUNCE_Y;
+        if (Math.abs(vy) < 320) vy = 0; // stop micro-bounces
+      }
+
+      const grounded = y >= maxY - 0.5 && vy === 0;
+      if (grounded) vx *= Math.exp(-3.5 * dt); // sliding friction
+
+      setTilt(Math.max(-22, Math.min(22, vx / 80)));
+      void win
+        .setPosition(new PhysicalPosition(Math.round(x), Math.round(y)))
+        .catch(() => {});
+
+      const settled = grounded && Math.abs(vx) < THROW_SETTLE_SPEED;
+      if (settled || now - startedAt > 8000) {
+        flightFrame.current = null;
+        setFlying(false);
+        setTilt(0);
+        return;
+      }
+      flightFrame.current = requestAnimationFrame(step);
+    };
+
+    flightFrame.current = requestAnimationFrame(step);
+  };
 
   // Dangle between the two extended poses while the frog is airborne.
   useEffect(() => {
@@ -106,6 +256,19 @@ export function FeelingFrog({
     );
     return () => clearInterval(id);
   }, [held]);
+
+  // Slow alternation between the flying poses, each for its own hold time.
+  useEffect(() => {
+    if (!flying) {
+      setFlightPose(0);
+      return;
+    }
+    const id = setTimeout(
+      () => setFlightPose((current) => (current + 1) % FLIGHT_FRAMES.length),
+      FLIGHT_FRAMES[flightPose].hold,
+    );
+    return () => clearTimeout(id);
+  }, [flying, flightPose]);
 
   // Drag state: window origin + pointer origin captured on press, so the
   // window follows the cursor without drifting. Null when not dragging.
@@ -123,6 +286,8 @@ export function FeelingFrog({
 
   const handlePointerDown = async (event: React.PointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return;
+    // Catch him out of the air.
+    stopFlight();
     try {
       const win = getCurrentWindow();
       const rect = event.currentTarget.getBoundingClientRect();
@@ -140,6 +305,9 @@ export function FeelingFrog({
         scale,
         moved: false,
       };
+      samples.current = [
+        { t: event.timeStamp, x: event.screenX * scale, y: event.screenY * scale },
+      ];
       event.currentTarget.setPointerCapture(event.pointerId);
     } catch {
       // Window APIs unavailable (plain browser dev): leave dragging disabled.
@@ -152,6 +320,9 @@ export function FeelingFrog({
 
     const pointerX = event.screenX * state.scale;
     const pointerY = event.screenY * state.scale;
+
+    samples.current.push({ t: event.timeStamp, x: pointerX, y: pointerY });
+    if (samples.current.length > 32) samples.current.shift();
 
     if (!state.moved) {
       const dx = pointerX - state.pointerX;
@@ -186,10 +357,19 @@ export function FeelingFrog({
   };
 
   const endDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
-    if (drag.current && event.currentTarget.hasPointerCapture(event.pointerId)) {
+    const state = drag.current;
+    if (state && event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
     setHeld(false);
+    if (!state?.moved) return; // A plain click is not a throw.
+
+    // Only the tail of the movement counts: if he was held still before being
+    // released, he simply drops instead of flying off.
+    const cutoff = event.timeStamp - THROW_SAMPLE_WINDOW;
+    const recent = samples.current.filter((sample) => sample.t >= cutoff);
+    samples.current = [];
+    void throwFrog(recent);
   };
 
   const handleClick = () => {
@@ -221,10 +401,22 @@ export function FeelingFrog({
   const framesPerSecond = breathing ? 3 : mood === "curious" ? 8 : 6;
   const frame = useSpriteFrame(animation, framesPerSecond);
 
-  const sheetColumn = held
-    ? ANIMATIONS.jump.column + HELD_FRAMES[heldPose]
-    : ANIMATIONS[animation].column + frame;
-  const sheetRow = held ? ANIMATIONS.jump.row : ANIMATIONS[animation].row;
+  // Carried and airborne poses come from fixed frames rather than the mood
+  // loop: dangling while held, wide-eyed and stretched while thrown.
+  const pose = flying
+    ? FLIGHT_FRAMES[flightPose]
+    : held
+      ? {
+          column: ANIMATIONS.jump.column + HELD_FRAMES[heldPose],
+          row: ANIMATIONS.jump.row,
+        }
+      : {
+          column: ANIMATIONS[animation].column + frame,
+          row: ANIMATIONS[animation].row,
+        };
+
+  const sheetColumn = pose.column;
+  const sheetRow = pose.row;
 
   return (
     <div className="relative h-full w-full">
@@ -268,7 +460,8 @@ export function FeelingFrog({
         {/* Soft contact shadow so the sprite sits on the desktop. */}
         <span
           aria-hidden
-          className="absolute bottom-1 left-1/2 h-3 w-3/4 -translate-x-1/2 rounded-full bg-emerald-950/25 blur-[6px]"
+          className="absolute bottom-1 left-1/2 h-3 w-3/4 -translate-x-1/2 rounded-full bg-emerald-950/25 blur-[6px] transition-opacity duration-200"
+          style={{ opacity: flying ? 0 : 1 }}
         />
         <span
           aria-hidden
@@ -279,6 +472,8 @@ export function FeelingFrog({
             backgroundPosition: `${-sheetColumn * RENDER_SIZE}px ${-sheetRow * RENDER_SIZE}px`,
             backgroundRepeat: "no-repeat",
             imageRendering: "pixelated",
+            // Lean into the throw, then straighten up once he lands.
+            transform: tilt === 0 ? undefined : `rotate(${tilt}deg)`,
           }}
         />
       </motion.button>
