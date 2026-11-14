@@ -286,6 +286,77 @@ pub async fn frog_chat(history: Vec<ChatTurn>, message: String) -> Result<String
     Ok(reply)
 }
 
+/// Event payload for a long selection the frog can summarize.
+#[derive(Clone, Serialize)]
+pub struct SelectionReadyPayload {
+    pub text: String,
+    pub words: usize,
+}
+
+/// Longest passage the summarizer will read.
+const MAX_SUMMARY_CHARS: usize = 8000;
+
+/// Summaries are a utility, not the persona chat: plain, skimmable, warm.
+const SUMMARY_SYSTEM: &str = "You are The Feeling Frog, summarizing a passage the user highlighted because \
+the wall of text felt like too much. Make it light and easy to skim for someone with ADHD.
+
+Return plain text, no markdown symbols, no extra commentary:
+1. One TL;DR line, at most 20 words.
+2. Then 3 to 5 tiny bullets, each 12 words or fewer, each starting with \"- \".
+Keep only the essential claims. If the passage is mostly fluff, say so in the TL;DR.";
+
+/// Summarizes a highlighted passage through Gemini.
+#[tauri::command]
+pub async fn summarize_selection(text: String) -> Result<String, String> {
+    let passage: String = text
+        .chars()
+        .take(MAX_SUMMARY_CHARS)
+        .collect::<String>()
+        .trim()
+        .to_string();
+    if passage.chars().count() < 40 {
+        return Err("nothing long enough to summarize".to_string());
+    }
+
+    let key = api_key().ok_or("GEMINI_API_KEY not configured")?;
+    let model = std::env::var("GEMINI_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+    let url = format!("{GEMINI_ENDPOINT}/{model}:generateContent?key={key}");
+    let request = serde_json::json!({
+        "system_instruction": { "parts": [{ "text": SUMMARY_SYSTEM }] },
+        "contents": [{
+            "role": "user",
+            "parts": [{ "text": format!("Summarize this passage:\n\n{passage}") }]
+        }],
+        "generationConfig": {
+            "temperature": 0.5,
+            "maxOutputTokens": 800,
+            "thinkingConfig": { "thinkingBudget": 0 }
+        }
+    });
+
+    let body: serde_json::Value = reqwest::Client::new()
+        .post(url)
+        .json(&request)
+        .timeout(LLM_TIMEOUT)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?
+        .error_for_status()
+        .map_err(|error| error.to_string())?
+        .json()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    let reply = reply_text(&body)
+        .ok_or("model returned no text")?
+        .trim()
+        .to_string();
+    if reply.is_empty() {
+        return Err("model returned no text".to_string());
+    }
+    Ok(reply)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

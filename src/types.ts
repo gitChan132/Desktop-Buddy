@@ -11,3 +11,9 @@ export interface FrogInterventionPayload {
     suggestedAction: 'belly_breathe' | 'visual_grounding' | 'task_intent' | 'mindful_pause';
     activeApp?: string;        // e.g. "Google Chrome"
 }
+
+/** A long passage the user highlighted; the frog offers to summarize it. */
+export interface SelectionReadyPayload {
+    text: string;
+    words: number;
+}

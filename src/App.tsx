@@ -8,9 +8,14 @@ import { BreatheAlong } from "./components/BreatheAlong";
 import { ChatWithFrog } from "./components/ChatWithFrog";
 import { FeelingFrog, type FrogMood } from "./components/FeelingFrog";
 import { MindfulPause } from "./components/MindfulPause";
+import { SelectionOffer } from "./components/SelectionOffer";
 import { TaskIntention } from "./components/TaskIntention";
 import { VisualGrounding } from "./components/VisualGrounding";
-import { INTERVENTION_TTL_MS, type FrogInterventionPayload } from "./types";
+import {
+  INTERVENTION_TTL_MS,
+  type FrogInterventionPayload,
+  type SelectionReadyPayload,
+} from "./types";
 
 /** Guided activities the frog can lead; each maps to one `suggestedAction`. */
 type OpenActivity =
@@ -71,6 +76,9 @@ function useClickThroughHitbox(forceInteractive: boolean) {
 export default function App() {
   const [intervention, setIntervention] =
     useState<FrogInterventionPayload | null>(null);
+  const [selectionOffer, setSelectionOffer] =
+    useState<SelectionReadyPayload | null>(null);
+  const [needsAccessibility, setNeedsAccessibility] = useState(false);
   const [activity, setActivity] = useState<OpenActivity | null>(null);
   const [carrying, setCarrying] = useState(false);
   const [breathPhase, setBreathPhase] = useState<BreathPhase | null>(null);
@@ -78,7 +86,9 @@ export default function App() {
   // Keep the whole window interactive while he is being carried or the guide is
   // up; otherwise the hitbox tick can make it click-through mid-drag and drop
   // the pointer capture.
-  useClickThroughHitbox(activity !== null || carrying);
+  useClickThroughHitbox(
+    activity !== null || carrying || selectionOffer !== null || needsAccessibility,
+  );
 
   useEffect(() => {
     const unlisten = listen<FrogInterventionPayload>(
@@ -87,6 +97,20 @@ export default function App() {
     );
     return () => {
       void unlisten.then((off) => off());
+    };
+  }, []);
+
+  // Long highlights arrive from the backend watcher; the frog offers a summary.
+  useEffect(() => {
+    const offer = listen<SelectionReadyPayload>("selection-ready", (event) =>
+      setSelectionOffer(event.payload),
+    );
+    const hint = listen("selection-unavailable", () =>
+      setNeedsAccessibility(true),
+    );
+    return () => {
+      void offer.then((off) => off());
+      void hint.then((off) => off());
     };
   }, []);
 
@@ -162,6 +186,12 @@ export default function App() {
         onClose={closeActivity}
       />
       <ChatWithFrog open={activity === "chat"} onClose={closeActivity} />
+      <SelectionOffer
+        offer={selectionOffer}
+        hint={needsAccessibility}
+        onDismiss={() => setSelectionOffer(null)}
+        onDismissHint={() => setNeedsAccessibility(false)}
+      />
     </div>
   );
 }
