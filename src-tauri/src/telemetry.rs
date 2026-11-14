@@ -34,7 +34,7 @@ const RELEASE_EVENT: &str = "pointer-release";
 
 // Per-window values that saturate their component of the stress score.
 const MAX_KEYS_PER_WINDOW: f32 = 180.0; // 6 keys/s sustained
-const MAX_BACKSPACES_PER_WINDOW: f32 = 24.0; // 0.8 backspaces/s sustained
+const MAX_BACKSPACES_PER_WINDOW: f32 = 36.0; // 1.2 backspaces/s sustained
 const MAX_MEAN_SPEED: f32 = 3000.0; // px/s
 const MAX_JITTER: f32 = 2000.0; // px/s std dev
 /// A click after this long of cursor stillness counts as a hesitant click.

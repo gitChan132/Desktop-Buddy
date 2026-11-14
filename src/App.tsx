@@ -4,7 +4,11 @@ import { useEffect, useState } from "react";
 import type { BreathPhase } from "./breathing";
 import { BreatheAlong } from "./components/BreatheAlong";
 import { FeelingFrog, type FrogMood } from "./components/FeelingFrog";
+import { VisualGrounding } from "./components/VisualGrounding";
 import { INTERVENTION_TTL_MS, type FrogInterventionPayload } from "./types";
+
+/** Guided activities the frog can lead; each maps to one `suggestedAction`. */
+type OpenActivity = "belly_breathe" | "visual_grounding";
 
 // Region (logical px, anchored bottom-center) where the frog is clickable.
 // Everything else in the transparent window stays click-through.
@@ -57,14 +61,14 @@ function useClickThroughHitbox(forceInteractive: boolean) {
 export default function App() {
   const [intervention, setIntervention] =
     useState<FrogInterventionPayload | null>(null);
-  const [breathingOpen, setBreathingOpen] = useState(false);
+  const [activity, setActivity] = useState<OpenActivity | null>(null);
   const [carrying, setCarrying] = useState(false);
   const [breathPhase, setBreathPhase] = useState<BreathPhase | null>(null);
 
   // Keep the whole window interactive while he is being carried or the guide is
   // up; otherwise the hitbox tick can make it click-through mid-drag and drop
   // the pointer capture.
-  useClickThroughHitbox(breathingOpen || carrying);
+  useClickThroughHitbox(activity !== null || carrying);
 
   useEffect(() => {
     const unlisten = listen<FrogInterventionPayload>(
@@ -83,17 +87,27 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [intervention]);
 
-  const mood: FrogMood = breathingOpen
+  const mood: FrogMood = activity === "belly_breathe"
     ? "croaking"
-    : intervention
-      ? intervention.trigger === "doomscroll"
-        ? "grumpy"
-        : "curious"
-      : "idle";
+    : activity
+      ? "curious"
+      : intervention
+        ? intervention.trigger === "doomscroll"
+          ? "grumpy"
+          : "curious"
+        : "idle";
 
-  const closeBreathing = () => {
-    setBreathingOpen(false);
+  const closeActivity = () => {
+    setActivity(null);
     setBreathPhase(null);
+    setIntervention(null);
+  };
+
+  // Clicking the frog opens the guide matching the nudge's suggested action;
+  // with no nudge it defaults to breathing.
+  const openGrounding = () => {
+    const action = intervention?.suggestedAction;
+    setActivity(action === "visual_grounding" ? "visual_grounding" : "belly_breathe");
     setIntervention(null);
   };
 
@@ -102,14 +116,18 @@ export default function App() {
       <FeelingFrog
         mood={mood}
         intervention={intervention}
-        onGrounding={() => setBreathingOpen(true)}
+        onGrounding={openGrounding}
         onCarry={setCarrying}
-        breathPhase={breathingOpen ? breathPhase : null}
+        breathPhase={activity === "belly_breathe" ? breathPhase : null}
       />
       <BreatheAlong
-        open={breathingOpen}
-        onClose={closeBreathing}
+        open={activity === "belly_breathe"}
+        onClose={closeActivity}
         onPhase={setBreathPhase}
+      />
+      <VisualGrounding
+        open={activity === "visual_grounding"}
+        onClose={closeActivity}
       />
     </div>
   );

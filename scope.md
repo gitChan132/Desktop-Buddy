@@ -23,12 +23,13 @@ bottom-right of the screen.
 
 | Trigger | What is monitored | Interpretation | Suggested action |
 | --- | --- | --- | --- |
-| `frantic_typing` | ≥180 keystrokes / 30s | Erratic typing cadence | `pond_stretch` |
-| `backspace_loop` | ≥24 backspaces / 30s **or** streak ≥6 | Perfectionism / frustration spiral | `belly_breathe` |
-| `cursor_hesitation` | ≥3 clicks each preceded by ≥2s of cursor stillness, / 30s | Decision difficulty | `lily_pad_step` |
-| `cursor_oscillation` | ≥6 significant direction reversals / 10s | Can't decide where to act next | `pond_stretch` |
-| `tab_thrashing` | >8 foreground window switches / 20s | Fragmented focus | `lily_pad_step` |
-| `idle_freeze` | ≥150s (2.5 min) zero input while a browser/editor is frontmost | Stuck, not resting | `pond_stretch` |
+| `frantic_typing` | ≥180 keystrokes / 30s | Erratic typing cadence | `belly_breathe` |
+| `backspace_loop` | ≥36 backspaces / 30s **or** streak ≥8 | Perfectionism / frustration spiral | `belly_breathe` |
+| `cursor_hesitation` | ≥3 clicks each preceded by ≥2s of cursor stillness, / 30s | Decision difficulty | `belly_breathe` |
+| `cursor_oscillation` | ≥6 significant direction reversals / 10s | Can't decide where to act next | `belly_breathe` |
+| `tab_thrashing` | >8 foreground window switches / 20s | Fragmented focus | `visual_grounding` |
+| `idle_freeze` | ≥150s (2.5 min) zero input while a browser/editor is frontmost | Stuck, not resting | `visual_grounding` |
+| `doomscroll` | TikTok/Instagram app or a browser feed tab frontmost ≥4 min, ≥40 wheel events / 90s, <10 keystrokes / 30s | Compulsive scrolling | `visual_grounding` |
 
 Priority order when several are true: backspace_loop → frantic_typing → cursor_hesitation →
 cursor_oscillation → tab_thrashing → idle_freeze.
@@ -40,7 +41,7 @@ Recomputed every 5s, contributes the payload `severity` (`low` <40, `medium` <70
 | Component | Saturates at | Weight |
 | --- | --- | --- |
 | Typing pressure | 180 keys / 30s | 0.25 |
-| Backspace pressure | 24 backspaces / 30s | 0.15 |
+| Backspace pressure | 36 backspaces / 30s | 0.15 |
 | Pointer velocity | mean 3000 px/s | 0.15 |
 | Pointer jitter | 2000 px/s std dev | 0.10 |
 | Hesitation | mean 3s stillness before click | 0.15 |
@@ -73,6 +74,8 @@ Recomputed every 5s, contributes the payload `severity` (`low` <40, `medium` <70
   10s auto-dismiss, mood routing.
 - `components/FeelingFrog.tsx` — sprite rig, hop/carry physics, speech bubble.
 - `components/BreatheAlong.tsx` — guided breathing modal + chime.
+- `components/VisualGrounding.tsx` — ~29s 20-20-20 guide: look away, find three
+  things, notice each one's colour/shape/texture.
 - `breathing.ts` — shared 3s inhale / 3s hold / 5s exhale rhythm.
 - `types.ts` — shared IPC contract (`BurnoutTrigger`, `FrogInterventionPayload`, TTL).
 
@@ -81,14 +84,15 @@ Recomputed every 5s, contributes the payload `severity` (`low` <40, `medium` <70
 ```typescript
 export type BurnoutTrigger =
   | 'frantic_typing' | 'backspace_loop' | 'tab_thrashing'
-  | 'idle_freeze' | 'cursor_hesitation' | 'cursor_oscillation';
+  | 'idle_freeze' | 'cursor_hesitation' | 'cursor_oscillation'
+  | 'doomscroll';
 
 export interface FrogInterventionPayload {
   id: string;
   trigger: BurnoutTrigger;
   severity: 'low' | 'medium' | 'high';
   message: string;
-  suggestedAction: 'belly_breathe' | 'lily_pad_step' | 'pond_stretch';
+  suggestedAction: 'belly_breathe' | 'visual_grounding';
   activeApp?: string;
 }
 ```
@@ -98,8 +102,8 @@ Emitted on the `trigger-intervention` Tauri event; bubbles hold for
 
 ## Status
 
-- All six triggers verified end-to-end against the live app (real injection + Gemini).
-- 35 Rust unit tests passing; `tsc --noEmit` and `vite build` clean.
+- All seven triggers verified end-to-end against the live app (real injection + Gemini).
+- 40 Rust unit tests passing; `tsc --noEmit` and `vite build` clean.
 - Fast-test env overrides: `FROG_EVAL_SECS`, `FROG_IDLE_FREEZE_SECS`,
   `FROG_FORCE_TRIGGER` (see `handoff.md`).
 - Pre-ship cleanup: remove debug `eprintln!` tick/emit logs and the `FROG_FORCE_TRIGGER` hook.

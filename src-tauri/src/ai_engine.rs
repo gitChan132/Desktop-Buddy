@@ -109,7 +109,7 @@ pub struct FrogInterventionPayload {
     /// One of `low`, `medium`, `high`.
     pub severity: String,
     pub message: String,
-    /// One of `belly_breathe`, `lily_pad_step`, `pond_stretch`.
+    /// One of `belly_breathe`, `visual_grounding`.
     pub suggested_action: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_app: Option<String>,
@@ -158,10 +158,10 @@ fn build_intervention(
             format!(
                 "*ribbit* {flips} flips in half a minute of Shorts. That is not rest, that is a slot machine. Close the tab and let your eyes land on something real."
             ),
-            "pond_stretch",
+            "visual_grounding",
         )
-    } else if typing.backspaces_in_window >= 24
-        || typing.backspace_streak >= 6
+    } else if typing.backspaces_in_window >= 36
+        || typing.backspace_streak >= 8
     {
         (
             "backspace_loop",
@@ -178,7 +178,7 @@ fn build_intervention(
                 "*ribbit* {} keystrokes in 30 seconds — your keys are hopping faster than me. Let's slow the pond down for one breath.",
                 typing.keys_in_window
             ),
-            "pond_stretch",
+            "belly_breathe",
         )
     } else if windows.hesitant_clicks >= 3 {
         (
@@ -187,7 +187,7 @@ fn build_intervention(
                 "*ribbit* That cursor rested a while before clicking — {} hesitant clicks in the last 30 seconds. Your pond has plenty of lily pads; take one slow breath and pick one.",
                 windows.hesitant_clicks
             ),
-            "lily_pad_step",
+            "belly_breathe",
         )
     } else if windows.direction_reversals >= OSCILLATION_MIN_REVERSALS {
         (
@@ -196,8 +196,8 @@ fn build_intervention(
                 "*ribbit* Your cursor is hopping back and forth across the pond — {} reversals in a few seconds. When you can't pick a lily pad, start with the smallest one and breathe.",
                 windows.direction_reversals
             ),
-            "pond_stretch",
-        ) 
+            "belly_breathe",
+        )
     } else if windows.on_feed
         && typing.keys_in_window < DOOMSCROLL_MAX_KEYS
         && windows.feed_seconds >= doomscroll_seconds()
@@ -210,7 +210,7 @@ fn build_intervention(
                 "*ribbit* {minutes} minutes of feed, {} scrolls, and not one word typed. That app is not a lily pad. Put it down and let your eyes rest on something that isn't glowing. I'm not asking twice.",
                 scrolls.scrolls_in_window
             ),
-            "pond_stretch",
+            "visual_grounding",
         )
     } else if windows.tab_thrashing {
         (
@@ -219,13 +219,13 @@ fn build_intervention(
                 "*ribbit* {} window switches in 20 seconds. Your focus is doing laps. One lily pad at a time.",
                 windows.switches_in_window
             ),
-            "lily_pad_step",
+            "visual_grounding",
         )
     } else if windows.idle_freeze {
         (
             "idle_freeze",
-            "*ribbit* Two and a half minutes, no keys and no mouse, and the editor still has you. Stretch your legs and let the pond settle.".to_string(),
-            "pond_stretch",
+            "*ribbit* Two and a half minutes, no keys and no mouse, and the editor still has you. Look away from the screen and let the pond settle.".to_string(),
+            "visual_grounding",
         )
     } else {
         return None;
@@ -318,12 +318,8 @@ fn cooldown() -> &'static Mutex<Option<Instant>> {
 
 fn suggested_action_for(trigger: &str) -> &'static str {
     match trigger {
-        "backspace_loop" => "belly_breathe",
-        "tab_thrashing" => "lily_pad_step",
-        "cursor_hesitation" => "lily_pad_step",
-        "cursor_oscillation" => "pond_stretch",
-        "doomscroll" => "pond_stretch",
-        _ => "pond_stretch",
+        "tab_thrashing" | "idle_freeze" | "doomscroll" => "visual_grounding",
+        _ => "belly_breathe",
     }
 }
 
@@ -377,7 +373,7 @@ Tell them plainly to close the feed, in one short sentence, still with a little 
                     "message": { "type": "STRING" },
                     "suggestedAction": {
                         "type": "STRING",
-                        "enum": ["belly_breathe", "lily_pad_step", "pond_stretch"]
+                        "enum": ["belly_breathe", "visual_grounding"]
                     }
                 },
                 "required": ["message", "suggestedAction"]
@@ -451,7 +447,11 @@ pub async fn trigger_frog_intervention(
     match ask_llm(&trigger, &window_title, &detected).await {
         Ok(reply) => {
             payload.message = reply.message;
-            payload.suggested_action = reply.suggested_action;
+            // The trigger→activity mapping wins for doomscroll so the eyes-off-screen
+            // guide always opens; other triggers let the model pick its soothing action.
+            if trigger != "doomscroll" {
+                payload.suggested_action = reply.suggested_action;
+            }
         }
         Err(error) => {
             eprintln!("[ai_engine] intervention LLM unavailable, using fallback: {error}");
@@ -560,7 +560,7 @@ mod tests {
     #[test]
     fn backspace_loop_detected_by_count() {
         let typing = TypingSnapshot {
-            backspaces_in_window: 24,
+            backspaces_in_window: 36,
             ..Default::default()
         };
         let payload = build_intervention(&typing, &WindowSnapshot::default(), &ScrollSnapshot::default()).unwrap();
@@ -571,7 +571,7 @@ mod tests {
     #[test]
     fn backspace_loop_detected_by_streak() {
         let typing = TypingSnapshot {
-            backspace_streak: 6,
+            backspace_streak: 8,
             ..Default::default()
         };
         let payload = build_intervention(&typing, &WindowSnapshot::default(), &ScrollSnapshot::default()).unwrap();
@@ -586,7 +586,7 @@ mod tests {
         };
         let payload = build_intervention(&typing, &WindowSnapshot::default(), &ScrollSnapshot::default()).unwrap();
         assert_eq!(payload.trigger, "frantic_typing");
-        assert_eq!(payload.suggested_action, "pond_stretch");
+        assert_eq!(payload.suggested_action, "belly_breathe");
     }
 
     #[test]
@@ -598,7 +598,7 @@ mod tests {
         };
         let payload = build_intervention(&TypingSnapshot::default(), &windows, &ScrollSnapshot::default()).unwrap();
         assert_eq!(payload.trigger, "cursor_hesitation");
-        assert_eq!(payload.suggested_action, "lily_pad_step");
+        assert_eq!(payload.suggested_action, "belly_breathe");
     }
 
     #[test]
@@ -620,7 +620,7 @@ mod tests {
         };
         let payload = build_intervention(&TypingSnapshot::default(), &windows, &ScrollSnapshot::default()).unwrap();
         assert_eq!(payload.trigger, "cursor_oscillation");
-        assert_eq!(payload.suggested_action, "pond_stretch");
+        assert_eq!(payload.suggested_action, "belly_breathe");
     }
 
     #[test]
@@ -642,7 +642,7 @@ mod tests {
         };
         let payload = build_intervention(&TypingSnapshot::default(), &windows, &ScrollSnapshot::default()).unwrap();
         assert_eq!(payload.trigger, "tab_thrashing");
-        assert_eq!(payload.suggested_action, "lily_pad_step");
+        assert_eq!(payload.suggested_action, "visual_grounding");
     }
 
     #[test]
@@ -658,7 +658,7 @@ mod tests {
     #[test]
     fn backspace_has_priority_over_other_signals() {
         let typing = TypingSnapshot {
-            backspaces_in_window: 24,
+            backspaces_in_window: 36,
             keys_in_window: 200,
             ..Default::default()
         };
@@ -684,13 +684,13 @@ mod tests {
     #[test]
     fn suggested_actions_map_by_trigger() {
         assert_eq!(suggested_action_for("backspace_loop"), "belly_breathe");
-        assert_eq!(suggested_action_for("tab_thrashing"), "lily_pad_step");
-        assert_eq!(suggested_action_for("frantic_typing"), "pond_stretch");
-        assert_eq!(suggested_action_for("idle_freeze"), "pond_stretch");
-        assert_eq!(suggested_action_for("cursor_hesitation"), "lily_pad_step");
-        assert_eq!(suggested_action_for("cursor_oscillation"), "pond_stretch");
-        assert_eq!(suggested_action_for("doomscroll"), "pond_stretch");
-        assert_eq!(suggested_action_for("unknown"), "pond_stretch");
+        assert_eq!(suggested_action_for("frantic_typing"), "belly_breathe");
+        assert_eq!(suggested_action_for("cursor_hesitation"), "belly_breathe");
+        assert_eq!(suggested_action_for("cursor_oscillation"), "belly_breathe");
+        assert_eq!(suggested_action_for("tab_thrashing"), "visual_grounding");
+        assert_eq!(suggested_action_for("idle_freeze"), "visual_grounding");
+        assert_eq!(suggested_action_for("doomscroll"), "visual_grounding");
+        assert_eq!(suggested_action_for("unknown"), "belly_breathe");
     }
 
     #[test]
@@ -711,7 +711,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(payload.trigger, "doomscroll");
-        assert_eq!(payload.suggested_action, "pond_stretch");
+        assert_eq!(payload.suggested_action, "visual_grounding");
         assert!(payload.message.contains("scrolls"));
     }
 
@@ -861,7 +861,7 @@ mod tests {
             ["suggestedAction"]["enum"]
             .as_array()
             .unwrap();
-        assert_eq!(actions.len(), 3);
+        assert_eq!(actions.len(), 2);
     }
 
     #[test]

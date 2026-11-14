@@ -192,8 +192,10 @@ them yet (candidate for stress-reactive moods).
 
 `FrogInterventionPayload` (`src/types.ts`): `id`, `trigger`
 (`frantic_typing | backspace_loop | tab_thrashing | idle_freeze | cursor_hesitation | cursor_oscillation | doomscroll`), `severity`,
-`message`, `suggestedAction` (`belly_breathe | lily_pad_step | pond_stretch`),
-optional `activeApp`. All actions currently open the same breathing guide.
+`message`, `suggestedAction`
+(`belly_breathe | visual_grounding`), optional `activeApp`. Clicking the frog
+opens `VisualGrounding.tsx` (~29s eyes-off-screen exercise) for
+`visual_grounding`; `belly_breathe` opens the breathing guide.
 
 ### Doomscroll detector
 
@@ -282,9 +284,10 @@ engine is expected to fall back to canned messages without one.
 3. **`hop` sprite band is unused**; the intervention hop is still framer-motion
    (`hop.start({ y: [-26, -14, 0] … })`). Could be replaced with the sprite jump
    row.
-4. **Intervention actions all open the breathing guide.** If `lily_pad_step` /
-   `pond_stretch` should do something distinct, branch in `App` on
-   `suggestedAction`.
+4. **Only two actions exist.** `tab_thrashing` / `idle_freeze` / `doomscroll` →
+   `visual_grounding` opens `VisualGrounding.tsx`; the arousal triggers →
+   `belly_breathe` opens breathing. Future guides get their own action id and
+   branch in `App.openGrounding`.
 5. **Unused backend events** `cursor-pos` / `pond-stress` — wiring the stress
    score into `FrogMood` (e.g. faster croak, worried pose) is the obvious next
    feature.

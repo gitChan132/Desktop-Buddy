@@ -84,8 +84,7 @@ interface FeelingFrogProps {
 const ACTION_LABEL: Record<FrogInterventionPayload["suggestedAction"], string> =
   {
     belly_breathe: "Belly breathe with me",
-    lily_pad_step: "Step onto the lily pad",
-    pond_stretch: "Pond stretch",
+    visual_grounding: "Look away with me",
   };
 
 // The sheet is a 16x16 grid of 32px cells. Each animation owns a 4-column
