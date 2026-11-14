@@ -101,6 +101,24 @@ fn build_intervention(
             ),
             "pond_stretch",
         )
+    } else if windows.hesitant_clicks >= 3 {
+        (
+            "cursor_hesitation",
+            format!(
+                "*ribbit* That cursor rested a while before clicking — {} hesitant clicks in the last 30 seconds. Your pond has plenty of lily pads; take one slow breath and pick one.",
+                windows.hesitant_clicks
+            ),
+            "lily_pad_step",
+        )
+    } else if windows.direction_reversals >= 6 {
+        (
+            "cursor_oscillation",
+            format!(
+                "*ribbit* Your cursor is hopping back and forth across the pond — {} reversals in a few seconds. When you can't pick a lily pad, start with the smallest one and breathe.",
+                windows.direction_reversals
+            ),
+            "pond_stretch",
+        )
     } else if windows.tab_thrashing {
         (
             "tab_thrashing",
@@ -146,6 +164,14 @@ fn detection_detail(
             "{} keystrokes in the last 30 seconds",
             typing.keys_in_window
         ),
+        "cursor_hesitation" => format!(
+            "{} hesitant clicks (avg {:.1}s of stillness) in the last 30 seconds",
+            windows.hesitant_clicks, windows.mean_hesitation_secs
+        ),
+        "cursor_oscillation" => format!(
+            "{} back-and-forth cursor reversals in the last 10 seconds",
+            windows.direction_reversals
+        ),
         "tab_thrashing" => format!(
             "{} window switches in the last 20 seconds",
             windows.switches_in_window
@@ -181,6 +207,8 @@ fn suggested_action_for(trigger: &str) -> &'static str {
     match trigger {
         "backspace_loop" => "belly_breathe",
         "tab_thrashing" => "lily_pad_step",
+        "cursor_hesitation" => "lily_pad_step",
+        "cursor_oscillation" => "pond_stretch",
         _ => "pond_stretch",
     }
 }
@@ -329,13 +357,15 @@ pub fn start(app: AppHandle) {
             let typing = telemetry::snapshot();
             let windows = window_tracker::snapshot();
             eprintln!(
-                "[ai_engine] tick keys={} backspaces={} streak={} switches={} thrash={} idle={} stress={:.2}",
+                "[ai_engine] tick keys={} backspaces={} streak={} switches={} thrash={} idle={} hesit={} rev={} stress={:.2}",
                 typing.keys_in_window,
                 typing.backspaces_in_window,
                 typing.backspace_streak,
                 windows.switches_in_window,
                 windows.tab_thrashing,
                 windows.idle_freeze,
+                windows.hesitant_clicks,
+                windows.direction_reversals,
                 windows.stress_score
             );
 
@@ -429,6 +459,50 @@ mod tests {
     }
 
     #[test]
+    fn cursor_hesitation_detected() {
+        let windows = WindowSnapshot {
+            hesitant_clicks: 3,
+            mean_hesitation_secs: 2.4,
+            ..Default::default()
+        };
+        let payload = build_intervention(&TypingSnapshot::default(), &windows).unwrap();
+        assert_eq!(payload.trigger, "cursor_hesitation");
+        assert_eq!(payload.suggested_action, "lily_pad_step");
+    }
+
+    #[test]
+    fn detection_detail_mentions_hesitation() {
+        let windows = WindowSnapshot {
+            hesitant_clicks: 4,
+            mean_hesitation_secs: 2.5,
+            ..Default::default()
+        };
+        let detail = detection_detail("cursor_hesitation", &TypingSnapshot::default(), &windows);
+        assert!(detail.contains("4 hesitant clicks"));
+    }
+
+    #[test]
+    fn cursor_oscillation_detected() {
+        let windows = WindowSnapshot {
+            direction_reversals: 6,
+            ..Default::default()
+        };
+        let payload = build_intervention(&TypingSnapshot::default(), &windows).unwrap();
+        assert_eq!(payload.trigger, "cursor_oscillation");
+        assert_eq!(payload.suggested_action, "pond_stretch");
+    }
+
+    #[test]
+    fn detection_detail_mentions_oscillation() {
+        let windows = WindowSnapshot {
+            direction_reversals: 7,
+            ..Default::default()
+        };
+        let detail = detection_detail("cursor_oscillation", &TypingSnapshot::default(), &windows);
+        assert!(detail.contains("7 back-and-forth"));
+    }
+
+    #[test]
     fn tab_thrashing_detected() {
         let windows = WindowSnapshot {
             tab_thrashing: true,
@@ -482,6 +556,8 @@ mod tests {
         assert_eq!(suggested_action_for("tab_thrashing"), "lily_pad_step");
         assert_eq!(suggested_action_for("frantic_typing"), "pond_stretch");
         assert_eq!(suggested_action_for("idle_freeze"), "pond_stretch");
+        assert_eq!(suggested_action_for("cursor_hesitation"), "lily_pad_step");
+        assert_eq!(suggested_action_for("cursor_oscillation"), "pond_stretch");
         assert_eq!(suggested_action_for("unknown"), "pond_stretch");
     }
 

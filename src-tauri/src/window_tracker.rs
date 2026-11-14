@@ -79,6 +79,12 @@ pub struct WindowSnapshot {
     pub tab_thrashing: bool,
     /// Detected: 2.5 minutes without input while a browser or editor is active.
     pub idle_freeze: bool,
+    /// Clicks in the last 30s preceded by at least 2s of cursor stillness.
+    pub hesitant_clicks: usize,
+    /// Mean seconds the cursor was still before clicking.
+    pub mean_hesitation_secs: f32,
+    /// Significant back-and-forth cursor reversals in the last 10 seconds.
+    pub direction_reversals: usize,
     /// Normalized (`0.0..=1.0`) pond ripple stress score from the telemetry engine.
     pub stress_score: f32,
 }
@@ -135,6 +141,8 @@ pub fn start() {
 pub fn snapshot() -> WindowSnapshot {
     let stress_score = telemetry::pond_stress();
     let seconds_since_input = telemetry::seconds_since_last_input();
+    let hesitation = telemetry::hesitation_snapshot();
+    let direction_reversals = telemetry::direction_reversals();
 
     let now = Instant::now();
     let (active_app, switches_in_window, tab_thrashing) = {
@@ -157,6 +165,9 @@ pub fn snapshot() -> WindowSnapshot {
         switches_in_window,
         tab_thrashing,
         idle_freeze,
+        hesitant_clicks: hesitation.hesitant_clicks,
+        mean_hesitation_secs: hesitation.mean_hesitation_secs,
+        direction_reversals,
         stress_score,
     }
 }

@@ -37,6 +37,16 @@ const MAX_KEYS_PER_WINDOW: f32 = 180.0; // 6 keys/s sustained
 const MAX_BACKSPACES_PER_WINDOW: f32 = 24.0; // 0.8 backspaces/s sustained
 const MAX_MEAN_SPEED: f32 = 3000.0; // px/s
 const MAX_JITTER: f32 = 2000.0; // px/s std dev
+/// A click after this long of cursor stillness counts as a hesitant click.
+const HESITATION_MIN_SECS: f32 = 2.0;
+/// Mean stillness-before-click that saturates the hesitation component.
+const MAX_HESITATION_SECS: f32 = 3.0;
+/// A horizontal step must exceed this many px to count toward a reversal.
+const REVERSAL_MIN_STEP: f64 = 6.0;
+/// Direction reversals are judged within this shorter window.
+const OSCILLATION_WINDOW: Duration = Duration::from_secs(10);
+/// Reversals that saturate the oscillation component of the stress score.
+const MAX_REVERSALS: f32 = 8.0;
 
 #[derive(Default)]
 struct TypingTelemetry {
@@ -55,6 +65,12 @@ struct PointerTelemetry {
     speeds: VecDeque<(Instant, f32)>,
     last_move: Option<Instant>,
     last_emit: Option<Instant>,
+    /// Seconds the cursor stayed still before each click, in the rolling window.
+    hesitations: VecDeque<(Instant, f32)>,
+    /// Horizontal direction of the last significant step (-1, 0, +1).
+    last_move_sign: i8,
+    /// Timestamps of significant horizontal direction reversals.
+    reversals: VecDeque<Instant>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -96,11 +112,16 @@ impl StressModel for WeightedStress {
         let (mean_speed, jitter) = speed_stats(&pointer.speeds);
         let velocity_pressure = (mean_speed / MAX_MEAN_SPEED).clamp(0.0, 1.0);
         let jitter_pressure = (jitter / MAX_JITTER).clamp(0.0, 1.0);
+        let (_, mean_hesitation) = hesitation_stats(&pointer.hesitations);
+        let hesitation_pressure = (mean_hesitation / MAX_HESITATION_SECS).clamp(0.0, 1.0);
+        let oscillation_pressure = (pointer.reversals.len() as f32 / MAX_REVERSALS).clamp(0.0, 1.0);
 
-        (key_pressure * 0.35
-            + backspace_pressure * 0.25
+        (key_pressure * 0.25
+            + backspace_pressure * 0.15
             + velocity_pressure * 0.15
-            + jitter_pressure * 0.25)
+            + jitter_pressure * 0.10
+            + hesitation_pressure * 0.15
+            + oscillation_pressure * 0.20)
             .clamp(0.0, 1.0)
     }
 }
@@ -176,6 +197,102 @@ fn note_keypress(state: &mut TypingTelemetry, key: Key, now: Instant) {
     }
 }
 
+/// Returns `(hesitant_clicks, mean stillness secs)` where a hesitant click is
+/// one preceded by at least [`HESITATION_MIN_SECS`] of no cursor movement.
+fn hesitation_stats(hesitations: &VecDeque<(Instant, f32)>) -> (usize, f32) {
+    if hesitations.is_empty() {
+        return (0, 0.0);
+    }
+    let mean = hesitations.iter().map(|(_, dwell)| *dwell).sum::<f32>() / hesitations.len() as f32;
+    let hesitant_clicks = hesitations
+        .iter()
+        .filter(|(_, dwell)| *dwell >= HESITATION_MIN_SECS)
+        .count();
+    (hesitant_clicks, mean)
+}
+
+fn prune_hesitations(queue: &mut VecDeque<(Instant, f32)>, now: Instant) {
+    while queue
+        .front()
+        .is_some_and(|(stamp, _)| now.duration_since(*stamp) > WINDOW)
+    {
+        queue.pop_front();
+    }
+}
+
+/// Records how long the cursor was still before this click. Measured from the
+/// last movement (or previous click), then that anchor is reset to this click so
+/// repeated clicks at one spot don't accumulate ever-growing dwell times.
+fn note_click(state: &mut PointerTelemetry, now: Instant) {
+    prune_hesitations(&mut state.hesitations, now);
+    if let Some((x, y, at)) = state.last_position {
+        let dwell = now.duration_since(at).as_secs_f32();
+        state.hesitations.push_back((now, dwell));
+        while state.hesitations.len() > POINTER_SAMPLES {
+            state.hesitations.pop_front();
+        }
+        state.last_position = Some((x, y, now));
+    }
+    // A click is input too, so it should reset idleness.
+    state.last_move = Some(now);
+}
+
+fn prune_reversals(queue: &mut VecDeque<Instant>, now: Instant) {
+    while queue
+        .front()
+        .is_some_and(|stamp| now.duration_since(*stamp) > OSCILLATION_WINDOW)
+    {
+        queue.pop_front();
+    }
+}
+
+/// Counts a reversal when a significant horizontal step flips direction, which
+/// is the fingerprint of the cursor moving back and forth between locations.
+fn note_move_direction(state: &mut PointerTelemetry, last_x: f64, x: f64, now: Instant) {
+    let dx = x - last_x;
+    if dx.abs() < REVERSAL_MIN_STEP {
+        return;
+    }
+    let sign = if dx > 0.0 { 1 } else { -1 };
+    if state.last_move_sign != 0 && sign != state.last_move_sign {
+        prune_reversals(&mut state.reversals, now);
+        state.reversals.push_back(now);
+        while state.reversals.len() > POINTER_SAMPLES {
+            state.reversals.pop_front();
+        }
+    }
+    state.last_move_sign = sign;
+}
+
+/// Number of significant back-and-forth reversals in the oscillation window.
+pub fn direction_reversals() -> usize {
+    let now = Instant::now();
+    let mut state = pointer().lock().expect("pointer telemetry lock poisoned");
+    prune_reversals(&mut state.reversals, now);
+    state.reversals.len()
+}
+
+/// Rolling hesitation picture exposed to the window snapshot.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HesitationSnapshot {
+    /// Clicks in the window preceded by at least [`HESITATION_MIN_SECS`] of stillness.
+    pub hesitant_clicks: usize,
+    /// Mean seconds of stillness before a click across the window.
+    pub mean_hesitation_secs: f32,
+}
+
+/// Current hesitation stats over the rolling window.
+pub fn hesitation_snapshot() -> HesitationSnapshot {
+    let now = Instant::now();
+    let mut state = pointer().lock().expect("pointer telemetry lock poisoned");
+    prune_hesitations(&mut state.hesitations, now);
+    let (hesitant_clicks, mean_hesitation_secs) = hesitation_stats(&state.hesitations);
+    HesitationSnapshot {
+        hesitant_clicks,
+        mean_hesitation_secs,
+    }
+}
+
 /// Returns `(mean px/s, std dev px/s)` for the sampled pointer speeds.
 fn speed_stats(speeds: &VecDeque<(Instant, f32)>) -> (f32, f32) {
     let count = speeds.len();
@@ -206,6 +323,7 @@ fn note_pointer(x: f64, y: f64, now: Instant) -> Option<CursorSample> {
     prune_speeds(&mut state.speeds, now);
 
     if let Some((last_x, last_y, at)) = state.last_position {
+        note_move_direction(&mut state, last_x, x, now);
         let elapsed = now.duration_since(at).as_secs_f32();
         // Skip duplicate events at identical timestamps to avoid infinite speed.
         if elapsed > f32::EPSILON {
@@ -240,6 +358,8 @@ fn refresh_pond_stress() -> f32 {
 
         let mut pointer_state = pointer().lock().expect("pointer telemetry lock poisoned");
         prune_speeds(&mut pointer_state.speeds, now);
+        prune_hesitations(&mut pointer_state.hesitations, now);
+        prune_reversals(&mut pointer_state.reversals, now);
 
         stress_model().score(&typing_state, &pointer_state)
     };
@@ -266,6 +386,10 @@ fn record(app: &AppHandle, event: Event) {
         }
         EventType::ButtonRelease(Button::Left) => {
             let _ = app.emit(RELEASE_EVENT, ());
+        }
+        EventType::ButtonPress(Button::Left) => {
+            let mut state = pointer().lock().expect("pointer telemetry lock poisoned");
+            note_click(&mut state, now);
         }
         _ => {}
     }
@@ -379,6 +503,74 @@ mod tests {
     }
 
     #[test]
+    fn hesitation_stats_counts_threshold_and_means_all() {
+        let now = Instant::now();
+        let mut hesitations = VecDeque::new();
+        hesitations.push_back((now, 0.5));
+        hesitations.push_back((now, 2.5));
+        hesitations.push_back((now, 4.0));
+        let (hesitant, mean) = hesitation_stats(&hesitations);
+        assert_eq!(hesitant, 2);
+        assert!((mean - (0.5 + 2.5 + 4.0) / 3.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn hesitation_stats_empty() {
+        assert_eq!(hesitation_stats(&VecDeque::new()), (0, 0.0));
+    }
+
+    #[test]
+    fn note_click_records_stillness_and_resets_anchor() {
+        let mut state = PointerTelemetry::default();
+        let base = Instant::now();
+        state.last_position = Some((10.0, 20.0, base - Duration::from_secs(3)));
+        note_click(&mut state, base);
+        assert_eq!(state.hesitations.len(), 1);
+        let dwell = state.hesitations.front().unwrap().1;
+        assert!((dwell - 3.0).abs() < 1e-3);
+        // Anchor resets to this click, so an immediate second click has ~0 dwell.
+        note_click(&mut state, base + Duration::from_millis(100));
+        assert!(state.hesitations.back().unwrap().1 < 0.2);
+        assert_eq!(state.last_move, Some(base + Duration::from_millis(100)));
+    }
+
+    #[test]
+    fn note_click_without_prior_move_is_ignored() {
+        let mut state = PointerTelemetry::default();
+        let now = Instant::now();
+        note_click(&mut state, now);
+        assert!(state.hesitations.is_empty());
+        assert_eq!(state.last_move, Some(now));
+    }
+
+    #[test]
+    fn direction_reversals_count_back_and_forth() {
+        let mut state = PointerTelemetry::default();
+        let base = Instant::now();
+        // +20, -20, +20, -20 => a reversal on every step after the first.
+        let steps = [0.0, 20.0, 0.0, 20.0, 0.0];
+        let mut last = 0.0;
+        for (i, x) in steps.iter().enumerate() {
+            note_move_direction(&mut state, last, *x, base + Duration::from_millis(i as u64 * 100));
+            last = *x;
+        }
+        assert_eq!(state.reversals.len(), 3);
+    }
+
+    #[test]
+    fn tiny_moves_do_not_count_as_reversals() {
+        let mut state = PointerTelemetry::default();
+        let base = Instant::now();
+        let steps = [0.0, 2.0, 0.0, 2.0, 0.0];
+        let mut last = 0.0;
+        for (i, x) in steps.iter().enumerate() {
+            note_move_direction(&mut state, last, *x, base + Duration::from_millis(i as u64 * 100));
+            last = *x;
+        }
+        assert!(state.reversals.is_empty());
+    }
+
+    #[test]
     fn stress_is_zero_when_idle() {
         let score = WeightedStress.score(&TypingTelemetry::default(), &PointerTelemetry::default());
         assert_eq!(score, 0.0);
@@ -393,7 +585,7 @@ mod tests {
             typing.keypresses.push_back(now);
         }
         let score = WeightedStress.score(&typing, &PointerTelemetry::default());
-        assert!((score - 0.35 * 0.5).abs() < 1e-3);
+        assert!((score - 0.25 * 0.5).abs() < 1e-3);
     }
 
     #[test]
@@ -413,8 +605,16 @@ mod tests {
                 .speeds
                 .push_back((now, if i % 2 == 0 { 6000.0 } else { 0.0 }));
         }
+        // Long dwells saturate the hesitation component too.
+        for _ in 0..3 {
+            pointer.hesitations.push_back((now, 4.0));
+        }
+        // A saturated reversal count saturates the oscillation component.
+        for _ in 0..8 {
+            pointer.reversals.push_back(now);
+        }
         let score = WeightedStress.score(&typing, &pointer);
-        assert_eq!(score, 1.0);
+        assert!((score - 1.0).abs() < 1e-5);
     }
 
     #[test]
