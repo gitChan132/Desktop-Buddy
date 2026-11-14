@@ -276,13 +276,23 @@ fn record(app: &AppHandle, event: Event) {
 /// Requires Accessibility permission on macOS.
 pub fn start(app: AppHandle) {
     let listener_app = app.clone();
-    if let Err(error) = app.run_on_main_thread(move || {
+    let run_listener = move || {
         if let Err(error) = listen(move |event| record(&listener_app, event)) {
             eprintln!("[telemetry] global input listener stopped: {error:?}");
         }
-    }) {
-        eprintln!("[telemetry] could not start listener on main thread: {error}");
+    };
+
+    // macOS needs the tap on the main queue (see above), but `listen` blocks for
+    // the lifetime of the app, so on Windows it must run on its own thread —
+    // blocking the main thread there starves the event loop and the app crashes.
+    #[cfg(target_os = "macos")]
+    {
+        if let Err(error) = app.run_on_main_thread(run_listener) {
+            eprintln!("[telemetry] could not start listener on main thread: {error}");
+        }
     }
+    #[cfg(not(target_os = "macos"))]
+    std::thread::spawn(run_listener);
 
     std::thread::spawn(move || loop {
         std::thread::sleep(STRESS_INTERVAL);

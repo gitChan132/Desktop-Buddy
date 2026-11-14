@@ -1,3 +1,5 @@
+import { PhysicalPosition } from "@tauri-apps/api/dpi";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   AnimatePresence,
   motion,
@@ -5,6 +7,9 @@ import {
 } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import type { FrogInterventionPayload } from "../types";
+
+/** Pointer travel (CSS px) before a press is treated as a drag instead of a click. */
+const DRAG_THRESHOLD = 4;
 
 export type FrogMood = "idle" | "curious" | "breathing";
 
@@ -29,6 +34,74 @@ export function FeelingFrog({
   const hop = useAnimationControls();
   const [blink, setBlink] = useState(false);
   const lastId = useRef<string | null>(null);
+
+  // Drag state: window origin + pointer origin captured on press, so the
+  // window follows the cursor without drifting. Null when not dragging.
+  const drag = useRef<{
+    pointerX: number;
+    pointerY: number;
+    windowX: number;
+    windowY: number;
+    scale: number;
+    moved: boolean;
+  } | null>(null);
+
+  const handlePointerDown = async (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+    try {
+      const win = getCurrentWindow();
+      const [position, scale] = await Promise.all([
+        win.outerPosition(),
+        win.scaleFactor(),
+      ]);
+      drag.current = {
+        pointerX: event.screenX * scale,
+        pointerY: event.screenY * scale,
+        windowX: position.x,
+        windowY: position.y,
+        scale,
+        moved: false,
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Window APIs unavailable (plain browser dev): leave dragging disabled.
+    }
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const state = drag.current;
+    if (!state) return;
+
+    const dx = event.screenX * state.scale - state.pointerX;
+    const dy = event.screenY * state.scale - state.pointerY;
+
+    if (!state.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD * state.scale) {
+      return;
+    }
+    state.moved = true;
+
+    void getCurrentWindow()
+      .setPosition(
+        new PhysicalPosition(
+          Math.round(state.windowX + dx),
+          Math.round(state.windowY + dy),
+        ),
+      )
+      .catch(() => {});
+  };
+
+  const endDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (drag.current && event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const handleClick = () => {
+    const wasDragged = drag.current?.moved ?? false;
+    drag.current = null;
+    if (wasDragged) return; // A drag must not trigger the breathing panel.
+    onGrounding();
+  };
 
   // Springy hop whenever a fresh intervention lands.
   useEffect(() => {
@@ -76,12 +149,16 @@ export function FeelingFrog({
       <motion.button
         type="button"
         data-interactive
-        aria-label="Open the lily pad breathing guide"
-        onClick={onGrounding}
+        aria-label="Drag to reposition the frog, click for the lily pad breathing guide"
+        onClick={handleClick}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
         animate={hop}
         whileHover={{ scale: 1.04 }}
         whileTap={{ scale: 0.95, y: 2 }}
-        className="pointer-events-auto relative h-[190px] w-[210px] cursor-pointer bg-transparent outline-none"
+        className="pointer-events-auto relative h-[190px] w-[210px] cursor-grab touch-none select-none bg-transparent outline-none active:cursor-grabbing"
       >
         <motion.svg
           viewBox="0 0 210 190"
