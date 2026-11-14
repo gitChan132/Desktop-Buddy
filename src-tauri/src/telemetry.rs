@@ -58,16 +58,8 @@ struct PointerTelemetry {
 pub struct TypingSnapshot {
     pub keys_in_window: usize,
     pub backspaces_in_window: usize,
-    /// `None` until the first keypress since launch.
-    pub seconds_since_last_key: Option<u64>,
     /// Current run of consecutive backspaces (0 if the run ended).
     pub backspace_streak: u32,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct PointerSnapshot {
-    /// `None` until the first mouse movement since launch.
-    pub seconds_since_motion: Option<u64>,
 }
 
 /// Throttled pointer sample emitted as the `cursor-pos` event.
@@ -129,6 +121,12 @@ fn pointer() -> &'static Mutex<PointerTelemetry> {
 fn latest_stress() -> &'static AtomicU32 {
     static STRESS: AtomicU32 = AtomicU32::new(0);
     &STRESS
+}
+
+/// Launch anchor, so "no input yet" can still age into idleness.
+fn startup() -> Instant {
+    static START: OnceLock<Instant> = OnceLock::new();
+    *START.get_or_init(Instant::now)
 }
 
 fn prune(queue: &mut VecDeque<Instant>, now: Instant) {
@@ -275,6 +273,7 @@ fn record(app: &AppHandle, event: Event) {
 /// thread; on a background thread every keypress would crash the app.
 /// Requires Accessibility permission on macOS.
 pub fn start(app: AppHandle) {
+    let _ = startup();
     let listener_app = app.clone();
     let run_listener = move || {
         if let Err(error) = listen(move |event| record(&listener_app, event)) {
@@ -318,20 +317,27 @@ pub fn snapshot() -> TypingSnapshot {
     TypingSnapshot {
         keys_in_window: state.keypresses.len(),
         backspaces_in_window: state.backspaces.len(),
-        seconds_since_last_key: state
-            .last_keypress
-            .map(|stamp| now.duration_since(stamp).as_secs()),
         backspace_streak: state.backspace_streak,
     }
 }
 
-pub fn pointer_snapshot() -> PointerSnapshot {
+/// Seconds since the most recent keyboard or mouse event, falling back to launch
+/// time so a freshly started app still ages into idleness.
+pub fn seconds_since_last_input() -> u64 {
     let now = Instant::now();
-    let state = pointer().lock().expect("pointer telemetry lock poisoned");
-
-    PointerSnapshot {
-        seconds_since_motion: state
-            .last_move
-            .map(|stamp| now.duration_since(stamp).as_secs()),
-    }
+    let last_key = typing()
+        .lock()
+        .expect("telemetry lock poisoned")
+        .last_keypress;
+    let last_move = pointer()
+        .lock()
+        .expect("pointer telemetry lock poisoned")
+        .last_move;
+    let latest = match (last_key, last_move) {
+        (Some(key), Some(moved)) => key.max(moved),
+        (Some(key), None) => key,
+        (None, Some(moved)) => moved,
+        (None, None) => startup(),
+    };
+    now.duration_since(latest).as_secs()
 }

@@ -1,14 +1,53 @@
-//! Active-window polling and app/tab thrashing detection.
-
+//! Active-window polling, tab-thrashing and idle-freeze detection.
+//!
+//! Every 2 seconds the foreground app/window is sampled into a rolling 20-second
+//! switch history. A snapshot combines that history with the telemetry engine's
+//! stress score and input recency, so `ai_engine` sees one stress picture.
 use std::collections::VecDeque;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use active_win_pos_rs::get_active_window;
 
-const POLL_INTERVAL: Duration = Duration::from_millis(1500);
-/// Window used to count context switches.
-const SWITCH_WINDOW: Duration = Duration::from_secs(60);
+use crate::telemetry;
+
+const POLL_INTERVAL: Duration = Duration::from_millis(2000);
+/// Window used to count window/title switches.
+const SWITCH_WINDOW: Duration = Duration::from_secs(20);
+/// More than this many switches inside [`SWITCH_WINDOW`] is tab thrashing.
+const THRASH_SWITCHES: usize = 8;
+/// Zero keyboard/mouse input this long while a focus app is active is an idle freeze.
+const IDLE_FREEZE: Duration = Duration::from_secs(6 * 60);
+
+/// App names (lowercase substrings) where sustained zero input means stuck, not resting.
+const FOCUS_APPS: &[&str] = &[
+    // Browsers
+    "chrome",
+    "safari",
+    "firefox",
+    "arc",
+    "edge",
+    "brave",
+    "opera",
+    "vivaldi",
+    "orion",
+    "chromium",
+    // Editors and IDEs
+    "code",
+    "cursor",
+    "sublime",
+    "zed",
+    "xcode",
+    "intellij",
+    "webstorm",
+    "pycharm",
+    "android studio",
+    "neovim",
+    "vim",
+    "emacs",
+    "textmate",
+    "nova",
+];
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ActiveApp {
@@ -22,10 +61,17 @@ struct TrackerState {
     switches: VecDeque<Instant>,
 }
 
+/// Window-tracker state joined with the telemetry stress score.
 #[derive(Clone, Debug, Default)]
 pub struct WindowSnapshot {
     pub active_app: Option<ActiveApp>,
     pub switches_in_window: usize,
+    /// Detected: more than 8 window/title switches in the last 20 seconds.
+    pub tab_thrashing: bool,
+    /// Detected: 6 minutes without input while a browser or editor is active.
+    pub idle_freeze: bool,
+    /// Normalized (`0.0..=1.0`) pond ripple stress score from the telemetry engine.
+    pub stress_score: f32,
 }
 
 fn tracker() -> &'static Mutex<TrackerState> {
@@ -42,6 +88,13 @@ fn prune(queue: &mut VecDeque<Instant>, now: Instant) {
     }
 }
 
+fn is_focus_app(app_name: &str) -> bool {
+    let app_name = app_name.to_lowercase();
+    FOCUS_APPS
+        .iter()
+        .any(|needle| app_name.contains(needle))
+}
+
 fn poll_once() {
     let Ok(window) = get_active_window() else {
         return;
@@ -50,11 +103,9 @@ fn poll_once() {
         app_name: window.app_name,
         title: window.title,
     };
-
     let now = Instant::now();
     let mut state = tracker().lock().expect("window tracker lock poisoned");
     prune(&mut state.switches, now);
-
     // Only count transitions between distinct app/window pairs, not repeated polls.
     if state.current.as_ref() != Some(&next) {
         if state.current.is_some() {
@@ -73,12 +124,30 @@ pub fn start() {
 }
 
 pub fn snapshot() -> WindowSnapshot {
+    let stress_score = telemetry::pond_stress();
+    let seconds_since_input = telemetry::seconds_since_last_input();
+
     let now = Instant::now();
-    let mut state = tracker().lock().expect("window tracker lock poisoned");
-    prune(&mut state.switches, now);
+    let (active_app, switches_in_window, tab_thrashing) = {
+        let mut state = tracker().lock().expect("window tracker lock poisoned");
+        prune(&mut state.switches, now);
+        (
+            state.current.clone(),
+            state.switches.len(),
+            state.switches.len() > THRASH_SWITCHES,
+        )
+    };
+
+    let idle_freeze = active_app
+        .as_ref()
+        .is_some_and(|app| is_focus_app(&app.app_name))
+        && seconds_since_input >= IDLE_FREEZE.as_secs();
 
     WindowSnapshot {
-        active_app: state.current.clone(),
-        switches_in_window: state.switches.len(),
+        active_app,
+        switches_in_window,
+        tab_thrashing,
+        idle_freeze,
+        stress_score,
     }
 }

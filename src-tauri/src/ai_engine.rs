@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use crate::telemetry::{self, PointerSnapshot, TypingSnapshot};
+use crate::telemetry::{self, TypingSnapshot};
 use crate::window_tracker::{self, WindowSnapshot};
 
 const EVALUATION_INTERVAL: Duration = Duration::from_secs(20);
@@ -49,11 +49,11 @@ fn next_id() -> String {
 
 fn build_intervention(
     typing: &TypingSnapshot,
-    pointer: &PointerSnapshot,
     windows: &WindowSnapshot,
 ) -> Option<FrogInterventionPayload> {
-    // Normalized 0.0..=1.0 score computed by the telemetry engine.
-    let score = (telemetry::pond_stress() * 100.0).round() as u8;
+    // Normalized 0.0..=1.0 score computed by the telemetry engine and folded into
+    // the window snapshot.
+    let score = (windows.stress_score * 100.0).round() as u8;
     let active_app = windows.active_app.as_ref().map(|app| app.app_name.clone());
 
     let (trigger, message, suggested_action) = if typing.backspaces_in_window >= 24
@@ -73,18 +73,19 @@ fn build_intervention(
             "*ribbit* Your keys are hopping faster than me. Let's slow the pond down for one breath.".to_string(),
             "pond_stretch",
         )
-    } else if windows.switches_in_window >= 6 {
+    } else if windows.tab_thrashing {
         (
             "tab_thrashing",
-            "*ribbit* Six app switches in a minute. Your focus is doing laps. One lily pad at a time.".to_string(),
+            format!(
+                "*ribbit* {} window switches in 20 seconds. Your focus is doing laps. One lily pad at a time.",
+                windows.switches_in_window
+            ),
             "lily_pad_step",
         )
-    } else if typing.seconds_since_last_key.is_some_and(|secs| secs >= 120)
-        && pointer.seconds_since_motion.is_none_or(|secs| secs >= 120)
-    {
+    } else if windows.idle_freeze {
         (
             "idle_freeze",
-            "*ribbit* You've been still for a while. Stretch your legs and let the pond settle.".to_string(),
+            "*ribbit* Six minutes, no keys and no mouse, and the editor still has you. Stretch your legs and let the pond settle.".to_string(),
             "pond_stretch",
         )
     } else {
@@ -135,9 +136,8 @@ pub fn start(app: AppHandle) {
             std::thread::sleep(EVALUATION_INTERVAL);
 
             let typing = telemetry::snapshot();
-            let pointer = telemetry::pointer_snapshot();
             let windows = window_tracker::snapshot();
-            let Some(payload) = build_intervention(&typing, &pointer, &windows) else {
+            let Some(payload) = build_intervention(&typing, &windows) else {
                 continue;
             };
 
