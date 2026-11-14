@@ -5,13 +5,16 @@
 //! frog can offer a summary. No clipboard access, no synthetic keystrokes.
 
 use std::collections::hash_map::DefaultHasher;
+#[cfg(target_os = "macos")]
 use std::ffi::c_void;
 use std::hash::{Hash, Hasher};
+#[cfg(target_os = "macos")]
 use std::ptr::NonNull;
 use std::time::{Duration, Instant};
 
 #[cfg(target_os = "macos")]
 use objc2_app_kit::NSWorkspace;
+#[cfg(target_os = "macos")]
 use objc2_core_foundation::{CFBoolean, CFRetained, CFString};
 use tauri::{AppHandle, Emitter};
 
@@ -28,11 +31,15 @@ const SAME_TEXT_COOLDOWN: Duration = Duration::from_secs(120);
 const GLOBAL_COOLDOWN: Duration = Duration::from_secs(10);
 
 const EVENT_SELECTION_READY: &str = "selection-ready";
+#[cfg(target_os = "macos")]
 const EVENT_SELECTION_UNAVAILABLE: &str = "selection-unavailable";
 
+#[cfg(target_os = "macos")]
 type AXUIElementRef = *mut c_void;
+#[cfg(target_os = "macos")]
 type CFTypeRef = *const c_void;
 
+#[cfg(target_os = "macos")]
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
     fn AXUIElementCreateApplication(pid: i32) -> AXUIElementRef;
@@ -49,6 +56,7 @@ unsafe extern "C" {
     fn AXIsProcessTrusted() -> bool;
 }
 
+#[cfg(target_os = "macos")]
 #[link(name = "CoreFoundation", kind = "framework")]
 unsafe extern "C" {
     fn CFRelease(value: *const c_void);
@@ -72,6 +80,7 @@ unsafe fn copy_attribute(element: AXUIElementRef, name: &str) -> Option<CFTypeRe
     }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn release(value: CFTypeRef) {
     if !value.is_null() {
         unsafe { CFRelease(value) };
