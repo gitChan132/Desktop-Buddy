@@ -20,9 +20,6 @@ fn evaluation_interval() -> Duration {
         .map(Duration::from_secs)
         .unwrap_or(EVALUATION_INTERVAL)
 }
-/// Don't nudge the user more often than this.
-const INTERVENTION_COOLDOWN: Duration = Duration::from_secs(45);
-
 /// Doomscroll gate: minutes on one feed window, and wheel events in the last
 /// 90 seconds. Both have env overrides for fast e2e checks.
 const DOOMSCROLL_SECONDS: u64 = 4 * 60;
@@ -148,7 +145,7 @@ fn build_intervention(
     // four-minute doomscroll gate.
     let short_form = is_short_form_scroll(windows, scrolls);
     // The pond can mute individual detectors.
-    let on = |id: &str| settings::trigger_enabled(id);
+    let on = |id: &str| settings::detector_enabled(id);
 
     let (trigger, message, suggested_action) = if on("doomscroll")
         && short_form
@@ -473,7 +470,7 @@ pub async fn trigger_frog_intervention(
         let mut last = cooldown()
             .lock()
             .expect("intervention cooldown lock poisoned");
-        if last.is_some_and(|stamp| stamp.elapsed() < INTERVENTION_COOLDOWN) {
+        if last.is_some_and(|stamp| stamp.elapsed() < settings::intervention_cooldown()) {
             return None;
         }
         *last = Some(Instant::now());

@@ -14,7 +14,7 @@ Last updated: 2026-11-14 · branch `main`
 |---|---|---|---|---|
 | 1 | **Precision-touchpad scrolling never reaches the wheel hook.** `scrolls30`/`scrolls90` stay `0` on the ThinkPad even while the user scrolls. | Instagram and TikTok doomscroll cannot trigger on that device. YouTube Shorts still works (flips). | `telemetry.rs` (`EventType::Wheel`) | rdev uses `WH_MOUSE_LL`; driver-emulated panning is delivered without `WM_MOUSEWHEEL`. Options: Raw Input (`WM_INPUT`), or a different signal for those feeds (e.g. pointer movement, UIA scroll). A physical mouse wheel does increment the counters. |
 | 2 | **Intervention bubble can clip at screen edges.** The window is allowed to hang off-screen so the frog can reach the edges, so a bubble centred in the window gets cut. | Cosmetic, worst when resting hard left/right. | `FeelingFrog.tsx` bubble container | Shift the bubble horizontally based on `outerPosition` vs monitor width. |
-| 3 | **45 s cooldown + 10 s evaluation = frequent nudges.** | Feels naggy during normal work; fine for demos. | `ai_engine.rs` `INTERVENTION_COOLDOWN` / `EVALUATION_INTERVAL` | Raise the cooldown when demoing is done. |
+| 3 | **Focus mode (25 s cooldown) + 10 s evaluation = frequent nudges.** | Feels naggy during normal work; fine for demos. | `settings::intervention_cooldown()` / evaluation interval | Chill already stretches it to 120 s; switch mode rather than editing the constant. |
 | 4 | **Shorts fast lane can fire from clicking, not just scrolling.** It counts tab-title changes, so clicking through recommended videos also counts as a flip. | False positive if someone is browsing YouTube by clicks. | `ai_engine.rs` `is_short_form_scroll` | Tighten by requiring regular flip intervals (e.g. no gap > 4 s) instead of a raw count. |
 | 5 | **`site_key` is a guess.** Browsers expose no URL, so thrashing groups tabs by title heuristics: known-site list, else the last `" - "` segment. | Switching between two Google properties counts as one site; en-dash titles fall back to the whole title. | `window_tracker.rs` | Only fixable with real URLs (UI Automation on the address bar, or a browser extension). |
 | 6 | **Chat and LLM copy need `GEMINI_API_KEY`.** Without it the app still works but uses canned replies. | Message quality only. | `chat.rs`, `ai_engine.rs` | `.env.local` is read automatically; model override via `GEMINI_MODEL`. |
@@ -87,6 +87,24 @@ Last updated: 2026-11-14 · branch `main`
     flight, and `start_pond_jump` stores the request (with a sequence number)
     so `FeelingFrog` can also poll `pending_pond_jump` every 200 ms — events
     are not replayed to a webview that was idle when they were emitted.
+17. **`AXFocusedApplication` on the system-wide element is useless for us.** It
+    answers `kAXErrorCannotComplete` (-25204) for any process that isn't a bundled
+    GUI app — the `tauri dev` binary included — so selection watching silently saw
+    nothing. Use `NSWorkspace`'s menu-bar-owning app (not `frontmostApplication`:
+    our always-on-top panel can steal that) plus `AXUIElementCreateApplication`.
+18. **`CFString::as_str_unchecked` returns `None` for UTF-16-backed strings.**
+    Chromium hands selections back that way, so every web-app selection decoded as
+    "no selection". Use `Display for CFString`, which copies through
+    `CFStringGetBytes`. Keep the `CFGetTypeID` guard too — casting a non-string
+    attribute to `CFString` would be undefined behaviour.
+19. **Chromium hides its accessibility tree until a client flips a flag.** Set
+    `AXManualAccessibility` (Electron/VS Code) **and** `AXEnhancedUserInterface`
+    (Chrome/Brave) once per pid. Re-sending them on every poll makes Chromium
+    rebuild the tree and return an *empty* selection forever — cache the pid.
+20. **The selection watcher used to emit the Accessibility hint once, at setup** —
+    before the webview subscribes, so it was usually swallowed. It now re-checks
+    `AXIsProcessTrusted()` every tick and re-sends `selection-unavailable` every ~5 s
+    until the grant lands. Keep that repeat: a single emit is unreliable.
 
 ---
 
@@ -104,7 +122,8 @@ Last updated: 2026-11-14 · branch `main`
 | Doomscroll general | 4 min on feed + 40 scrolls/90 s + <10 keys/30 s |
 | Doomscroll Shorts | 30 s on a YouTube window + 6 flips **or** 6 scrolls/30 s |
 | Evaluation loop | every 10 s (`FROG_EVAL_SECS`) |
-| Intervention cooldown | 45 s, shared by all triggers |
+| Intervention cooldown | by mode: Focus 25 s, Chill 120 s, Fun 30 s (`settings::intervention_cooldown()`) |
+| Selection poll | 900 ms; ≥400 chars, stable 2 ticks; offers ≥10 s apart, 120 s for the same text |
 | Intervention bubble TTL | 10 s (`INTERVENTION_TTL_MS`) |
 | Idle freeze | 150 s (`FROG_IDLE_FREEZE_SECS`) |
 | Throw | 110 ms velocity window, max 4200 px/s, gravity 2600, drag e^−1.1t, bounce 0.55/0.45 |

@@ -17,10 +17,14 @@ export type ActivityId =
   | "task_intent"
   | "mindful_pause";
 
+export type PondMode = "focus" | "chill" | "fun";
+
 export type FrogSettings = {
   nudgesPaused: boolean;
   soundEnabled: boolean;
   volume: number;
+  mode: PondMode;
+  selectionSummaries: boolean;
   triggers: {
     franticTyping: boolean;
     backspaceLoop: boolean;
@@ -44,6 +48,8 @@ export const DEFAULT_SETTINGS: FrogSettings = {
   nudgesPaused: false,
   soundEnabled: true,
   volume: 0.5,
+  mode: "focus",
+  selectionSummaries: true,
   triggers: {
     franticTyping: true,
     backspaceLoop: true,
@@ -71,6 +77,11 @@ export const saveSoundEnabled = (enabled: boolean) =>
 
 export const saveVolume = (volume: number) =>
   invoke("set_sound_volume", { volume });
+
+export const saveMode = (mode: PondMode) => invoke("set_mode", { mode });
+
+export const saveSelectionSummaries = (enabled: boolean) =>
+  invoke("set_selection_summaries", { enabled });
 
 export const saveTriggerEnabled = (trigger: TriggerId, enabled: boolean) =>
   invoke("set_trigger_enabled", { trigger, enabled });

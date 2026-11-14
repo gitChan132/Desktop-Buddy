@@ -13,12 +13,12 @@ lives there.
 
 At the time of writing:
 
-- `origin/main` now includes "Add cursor hesitation and oscillation detection"; the rig
-  work below is all committed and the working tree is clean.
-- The backend detects **six** triggers — `frantic_typing`, `backspace_loop`,
-  `tab_thrashing`, `idle_freeze`, plus the new `cursor_hesitation` and
-  `cursor_oscillation` (see `scope.md` / `handoff.md`).
-- `npx tsc --noEmit`, `npm run build`, and `cargo test --lib` (35 tests) all pass.
+- `origin/main` includes the pond panel (status / settings / activities / modes) and the
+  selection summary watcher; everything below is committed and pushed.
+- The backend detects **seven** triggers — `frantic_typing`, `backspace_loop`,
+  `tab_thrashing`, `idle_freeze`, `cursor_hesitation`, `cursor_oscillation` and
+  `doomscroll` (see `scope.md` / `handoff.md`).
+- `npx tsc --noEmit`, `npm run build`, and `cargo test --lib` (54 tests) all pass.
 - The app runs and every behaviour below has been verified in the real Tauri window, not
   just in a browser tab.
 
@@ -285,7 +285,7 @@ at random per intervention. Clicking the frog opens the guide for its
   segment). Switching between YouTube tabs, or Instagram tabs, is a *content
   flip*, not a window switch; only moving between different sites counts.
 - Evaluation runs every 10 s, so the Shorts rule lands roughly 30–40 s after the
-  window takes focus. The 45-second intervention cooldown still applies.
+  window takes focus. The mode cooldown still applies (Focus 25 s / Chill 120 s / Fun 30 s).
 - Demo/test overrides: `FROG_DOOMSCROLL_SECS`, `FROG_DOOMSCROLL_SCROLLS`,
   `FROG_SHORTS_SECS`, `FROG_SHORTS_SCROLLS` (alongside `FROG_EVAL_SECS`).
 - Frontend: `App` maps `trigger === "doomscroll"` to the `grumpy` mood;
@@ -375,3 +375,31 @@ engine is expected to fall back to canned messages without one.
   crown offset (≈ `209, 367` at 125% DPI).
 - **Breathing guide:** open, capture at ~0.5s / ~2.5s / ~4s / ~7s to hit inhale,
   late inhale, hold, exhale.
+
+---
+
+## 10. Pond panel, settings, modes, selection offer
+
+- `SettingsPond.tsx` is its own 760×540 window; `lib.rs` shows it from the tray menu or the
+  frog popover and asks for a tab through `pond_tab` (tab + seq). It hops in from
+  `frog_anchor` and polls `frog_stats` every 2 s for the sparklines.
+- Tabs: **status**, **settings**, **activities**, **modes**. The activities tab also runs
+  the guides inline on the lilypad — `ACTIVITY_INFO` holds the step text and durations,
+  and the backend's `suggestedAction` list is separate.
+- Settings are optimistic: flip local state, fire the `set_*` command, and let the
+  `frog-settings` broadcast reconcile every window. Add new fields to `FrogSettings`
+  (`src/settings.ts`) + the Rust `Settings` struct together — the event payload is the
+  whole struct.
+- Modes are real: `mode` is persisted in the backend and drives `intervention_cooldown()`
+  and `detector_enabled()` (Chill mutes doomscroll). Don't reintroduce local-only mode
+  state; read `settings.mode`. Because the toggle still shows its own state, the doomscroll
+  row takes a `note` prop ("muted in chill mode") while Chill is selected — `Toggle`
+  renders it under the label.
+- The accessibility hint (`selection-unavailable`) is re-sent by the backend every ~5 s
+  while permission is missing, so `App` may receive it repeatedly; setting the flag again
+  is harmless. `onDismissHint` clears it locally, and the next emit brings it back if the
+  grant still isn't there.
+- `SelectionOffer.tsx` renders two things above the frog: a "summarize this?" pill and the
+  result bubble. It listens for `selection-ready` / `selection-unavailable` in `App.tsx`;
+  the pill TTL is 12 s and summaries linger 45 s or until dismissed. The summary request is
+  `invoke("summarize_selection", { text })` — the only place user text leaves the machine.
