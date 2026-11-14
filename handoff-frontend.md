@@ -282,10 +282,12 @@ engine is expected to fall back to canned messages without one.
    off-screen for the frog to reach an edge, the bubble (centred in the window)
    can be cut off when he rests hard against the left/right edge. Fix would be to
    shift the bubble horizontally based on the window's screen position.
-2. **Startup float vs landing height.** `position_bottom_right()` in
-   `src-tauri/src/lib.rs` places the *window* 12px above the work area, so he
-   starts ~40px higher than where a throw leaves him (feet on the taskbar line).
-   Align the Rust placement with the sprite-aware bottom if it bothers you.
+2. **Startup placement matches the throw landing.** `position_bottom_right()` in
+   `src-tauri/src/lib.rs` drops the window by `FROG_FEET_INSET_CSS` (18 CSS px,
+   the gap between the window edge and the frog's feet) so he spawns resting on
+   the taskbar rather than floating a sprite-box height above it. The transparent
+   window therefore hangs ~23px below the work area at 125% DPI, exactly as it
+   does after a throw.
 3. **`hop` sprite band is unused**; the intervention hop is still framer-motion
    (`hop.start({ y: [-26, -14, 0] … })`). Could be replaced with the sprite jump
    row.

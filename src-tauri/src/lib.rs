@@ -23,6 +23,13 @@ const SETTINGS_EVENT: &str = "frog-settings";
 /// Holds the tray menu so the check marks can be synced from commands.
 struct TrayMenu(tauri::menu::Menu<tauri::Wry>);
 
+/// Distance from the window's bottom edge to the frog's feet, in CSS px. The
+/// sprite button sits `bottom-3` (12px) above the window edge and the art ends
+/// at 31/32 of a 32px cell rendered at 192px, i.e. 18px. Used to start him
+/// resting on the taskbar, the same spot a throw drops him at, instead of
+/// floating a sprite-box height above it.
+const FROG_FEET_INSET_CSS: f64 = 18.0;
+
 /// macOS: let the window float over other apps' full-screen Spaces.
 /// `CanJoinAllSpaces` (set by `set_visible_on_all_workspaces`) keeps it on every
 /// regular Space. `FullScreenAuxiliary` alone only lifts it over the owning
@@ -48,16 +55,21 @@ fn float_over_fullscreen_spaces(window: &WebviewWindow) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Anchors the frameless frog window to the bottom-right of the monitor work area.
+/// Anchors the frameless frog window to the bottom-right of the monitor work area,
+/// with his feet resting on the bottom edge rather than the window frame.
 fn position_bottom_right(window: &WebviewWindow) -> tauri::Result<()> {
     let Some(monitor) = window.current_monitor()? else {
         return Ok(());
     };
     let area = monitor.work_area();
     let size = window.outer_size()?;
+    let scale = window.scale_factor()?;
+    let feet_inset = (FROG_FEET_INSET_CSS * scale).round() as i32;
 
     let x = area.position.x + area.size.width as i32 - size.width as i32 - SCREEN_MARGIN;
-    let y = area.position.y + area.size.height as i32 - size.height as i32 - SCREEN_MARGIN;
+    // The transparent window hangs a little under the taskbar so the visible
+    // frog lands exactly where a thrown frog settles.
+    let y = area.position.y + area.size.height as i32 - size.height as i32 + feet_inset;
     window.set_position(PhysicalPosition::new(x, y))
 }
 
