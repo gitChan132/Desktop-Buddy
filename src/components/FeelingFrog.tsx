@@ -9,6 +9,22 @@ import { useEffect, useRef, useState } from "react";
 import greenSpritesheet from "../assets/frog/green_spritesheet.png";
 import type { FrogInterventionPayload } from "../types";
 
+/**
+ * Where a hand would grip the frog inside one 32px cell: the centre of the
+ * crown, just below the top of the head in the extended jump pose. The window
+ * is shifted so this exact point sits under the cursor while carrying him.
+ */
+const CROWN_X = 15.5 / 32;
+const CROWN_Y = 13 / 32;
+
+/**
+ * Frames of the jump row where the frog is stretched out nose-to-toes. While
+ * it is being carried the two alternate, so the held pose keeps dangling
+ * rather than freezing mid-air.
+ */
+const HELD_FRAMES = [1, 2];
+const HELD_FRAMES_PER_SECOND = 2;
+
 /** Pointer travel (CSS px) before a press is treated as a drag instead of a click. */
 const DRAG_THRESHOLD = 4;
 
@@ -73,6 +89,24 @@ export function FeelingFrog({
   const hop = useAnimationControls();
   const lastId = useRef<string | null>(null);
 
+  // True once a press turns into a real drag, i.e. the user is carrying the
+  // frog. Held frogs pose in full extension instead of looping an animation.
+  const [held, setHeld] = useState(false);
+  const [heldPose, setHeldPose] = useState(0);
+
+  // Dangle between the two extended poses while the frog is airborne.
+  useEffect(() => {
+    if (!held) {
+      setHeldPose(0);
+      return;
+    }
+    const id = setInterval(
+      () => setHeldPose((current) => (current + 1) % HELD_FRAMES.length),
+      1000 / HELD_FRAMES_PER_SECOND,
+    );
+    return () => clearInterval(id);
+  }, [held]);
+
   // Drag state: window origin + pointer origin captured on press, so the
   // window follows the cursor without drifting. Null when not dragging.
   const drag = useRef<{
@@ -80,6 +114,9 @@ export function FeelingFrog({
     pointerY: number;
     windowX: number;
     windowY: number;
+    /** Crown position in physical px, relative to the window's top-left. */
+    crownX: number;
+    crownY: number;
     scale: number;
     moved: boolean;
   } | null>(null);
@@ -88,6 +125,7 @@ export function FeelingFrog({
     if (event.button !== 0) return;
     try {
       const win = getCurrentWindow();
+      const rect = event.currentTarget.getBoundingClientRect();
       const [position, scale] = await Promise.all([
         win.outerPosition(),
         win.scaleFactor(),
@@ -97,6 +135,8 @@ export function FeelingFrog({
         pointerY: event.screenY * scale,
         windowX: position.x,
         windowY: position.y,
+        crownX: (rect.left + rect.width * CROWN_X) * scale,
+        crownY: (rect.top + rect.height * CROWN_Y) * scale,
         scale,
         moved: false,
       };
@@ -110,19 +150,36 @@ export function FeelingFrog({
     const state = drag.current;
     if (!state) return;
 
-    const dx = event.screenX * state.scale - state.pointerX;
-    const dy = event.screenY * state.scale - state.pointerY;
+    const pointerX = event.screenX * state.scale;
+    const pointerY = event.screenY * state.scale;
 
-    if (!state.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD * state.scale) {
+    if (!state.moved) {
+      const dx = pointerX - state.pointerX;
+      const dy = pointerY - state.pointerY;
+      if (Math.hypot(dx, dy) < DRAG_THRESHOLD * state.scale) return;
+
+      // First real movement: shift the window so the crown lands under the
+      // cursor, then drag from there. Grabbing him anywhere picks him up by
+      // the forehead instead of letting him hang off the grab point.
+      state.moved = true;
+      setHeld(true);
+      state.windowX = Math.round(pointerX - state.crownX);
+      state.windowY = Math.round(pointerY - state.crownY);
+      state.pointerX = pointerX;
+      state.pointerY = pointerY;
+      void getCurrentWindow()
+        .setPosition(
+          new PhysicalPosition(Math.round(state.windowX), Math.round(state.windowY)),
+        )
+        .catch(() => {});
       return;
     }
-    state.moved = true;
 
     void getCurrentWindow()
       .setPosition(
         new PhysicalPosition(
-          Math.round(state.windowX + dx),
-          Math.round(state.windowY + dy),
+          Math.round(state.windowX + (pointerX - state.pointerX)),
+          Math.round(state.windowY + (pointerY - state.pointerY)),
         ),
       )
       .catch(() => {});
@@ -132,11 +189,13 @@ export function FeelingFrog({
     if (drag.current && event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
+    setHeld(false);
   };
 
   const handleClick = () => {
     const wasDragged = drag.current?.moved ?? false;
     drag.current = null;
+    setHeld(false);
     if (wasDragged) return; // A drag must not trigger the breathing panel.
     onGrounding();
   };
@@ -162,8 +221,10 @@ export function FeelingFrog({
   const framesPerSecond = breathing ? 3 : mood === "curious" ? 8 : 6;
   const frame = useSpriteFrame(animation, framesPerSecond);
 
-  const sheetColumn = ANIMATIONS[animation].column + frame;
-  const sheetRow = ANIMATIONS[animation].row;
+  const sheetColumn = held
+    ? ANIMATIONS.jump.column + HELD_FRAMES[heldPose]
+    : ANIMATIONS[animation].column + frame;
+  const sheetRow = held ? ANIMATIONS.jump.row : ANIMATIONS[animation].row;
 
   return (
     <div className="relative h-full w-full">
