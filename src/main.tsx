@@ -1,12 +1,19 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import { ControlPanel } from "./components/ControlPanel";
 import { SettingsPond } from "./components/SettingsPond";
 import "./styles.css";
 
-// Both windows share this bundle; only the label decides what they render.
-const isPanel = getCurrentWindow().label === "panel";
+// All windows share this bundle; the label decides what each one renders.
+const label = getCurrentWindow().label;
 
 createRoot(document.getElementById("root")!).render(
-  isPanel ? <SettingsPond /> : <App />,
+  label === "panel" ? (
+    <ControlPanel />
+  ) : label === "pond" ? (
+    <SettingsPond />
+  ) : (
+    <App />
+  ),
 );

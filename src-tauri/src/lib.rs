@@ -18,6 +18,8 @@ const TRAY_GAP: i32 = 8;
 
 const TRAY_ID: &str = "frog-tray";
 const PANEL_LABEL: &str = "panel";
+/// The big lilypad settings window, opened from the small popover.
+const POND_LABEL: &str = "pond";
 const SETTINGS_EVENT: &str = "frog-settings";
 /// Fired when the pond panel is shown so the frog can hop in again.
 const PANEL_OPENED_EVENT: &str = "pond-panel-shown";
@@ -81,7 +83,7 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
     let menu = Menu::with_items(
         app,
         &[
-            &MenuItem::with_id(app, "panel", "Pond settings", true, None::<&str>)?,
+            &MenuItem::with_id(app, "panel", "Control panel", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &CheckMenuItem::with_id(
                 app,
@@ -151,27 +153,22 @@ fn set_main_visible(app: &AppHandle, visible: bool) {
     }
 }
 
-/// Opens or hides the control panel, anchoring it near the clicked tray icon.
+/// Opens or hides the small control popover, anchoring it near the clicked
+/// tray icon. The big pond window is opened from inside the popover.
 fn toggle_panel(app: &AppHandle, cursor: Option<PhysicalPosition<f64>>) {
     let Some(panel) = app.get_webview_window(PANEL_LABEL) else {
         return;
     };
     if panel.is_visible().unwrap_or(false) {
-        let _ = panel.set_always_on_top(false);
         let _ = panel.hide();
-        set_main_visible(app, true);
         return;
     }
     match cursor {
         Some(cursor) => position_panel_near(&panel, cursor),
         None => position_panel_default(&panel),
     }
-    set_main_visible(app, false);
-    // Other apps (or the frog) must not cover the pond while it is open.
-    let _ = panel.set_always_on_top(true);
     let _ = panel.show();
     let _ = panel.set_focus();
-    let _ = app.emit(PANEL_OPENED_EVENT, ());
 }
 
 /// Places the panel under a top tray icon (macOS menu bar) or above a bottom
@@ -230,6 +227,20 @@ fn position_panel_default(panel: &WebviewWindow) {
     let x = area.position.x + area.size.width as i32 - size.width as i32 - SCREEN_MARGIN;
     let y = area.position.y + SCREEN_MARGIN;
     let _ = panel.set_position(PhysicalPosition::new(x, y));
+}
+
+/// Centres the big pond window on the primary monitor.
+fn position_pond_center(pond: &WebviewWindow) {
+    let Ok(Some(monitor)) = pond.primary_monitor() else {
+        return;
+    };
+    let Ok(size) = pond.outer_size() else {
+        return;
+    };
+    let area = monitor.work_area();
+    let x = area.position.x + (area.size.width as i32 - size.width as i32) / 2;
+    let y = area.position.y + (area.size.height as i32 - size.height as i32) / 2;
+    let _ = pond.set_position(PhysicalPosition::new(x, y));
 }
 
 /// Mirrors the current settings into the tray menu's check marks.
@@ -351,12 +362,30 @@ fn frog_anchor(app: AppHandle) -> Option<FrogAnchor> {
     })
 }
 
-/// Closes the panel and brings the frog back to the desktop.
+/// Opens the big pond window from the small popover: hide the popover and the
+/// frog overlay, centre the pond, raise it and let the frog hop in.
 #[tauri::command]
-fn hide_panel(app: AppHandle) {
+fn open_pond(app: AppHandle) {
     if let Some(panel) = app.get_webview_window(PANEL_LABEL) {
-        let _ = panel.set_always_on_top(false);
         let _ = panel.hide();
+    }
+    let Some(pond) = app.get_webview_window(POND_LABEL) else {
+        return;
+    };
+    set_main_visible(&app, false);
+    position_pond_center(&pond);
+    let _ = pond.set_always_on_top(true);
+    let _ = pond.show();
+    let _ = pond.set_focus();
+    let _ = app.emit(PANEL_OPENED_EVENT, ());
+}
+
+/// Closes the pond and brings the frog back to the desktop.
+#[tauri::command]
+fn hide_pond(app: AppHandle) {
+    if let Some(pond) = app.get_webview_window(POND_LABEL) {
+        let _ = pond.set_always_on_top(false);
+        let _ = pond.hide();
     }
     set_main_visible(&app, true);
 }
@@ -373,7 +402,8 @@ pub fn run() {
             quit_app,
             frog_stats,
             frog_anchor,
-            hide_panel
+            open_pond,
+            hide_pond
         ])
         .setup(|app| {
             // macOS: live only in the menu bar — no Dock tile, no Cmd-Tab entry.
@@ -412,9 +442,17 @@ pub fn run() {
                 // some macOS versions; keep it hidden until the tray toggles it.
                 panel.hide()?;
             }
-            // Dev/demo hook: open the pond panel straight away.
+            if let Some(pond) = app.get_webview_window(POND_LABEL) {
+                #[cfg(target_os = "macos")]
+                float_over_fullscreen_spaces(&pond)?;
+                pond.hide()?;
+            }
+            // Dev/demo hooks: open the small popover or the big pond at launch.
             if std::env::var("FROG_OPEN_PANEL").is_ok() {
                 toggle_panel(app.handle(), None);
+            }
+            if std::env::var("FROG_OPEN_POND").is_ok() {
+                open_pond(app.handle().clone());
             }
             Ok(())
         })

@@ -180,23 +180,26 @@ literal hex values in those classes and match the sprite (`#0b3a1f` ink,
 
 ### Pond settings window
 
-- Tray menu → **Pond settings** (or left-clicking the tray icon) toggles the
-  second window, id `panel`, 760×540 CSS, transparent.
-- Showing the panel hides the frog overlay (it is always-on-top and would cover
-  the pond) and raises the panel always-on-top; hiding it ("Back to desktop",
-  Escape, or the tray toggle) restores the frog.
+- The tray menu (**Control panel**, or left-clicking the tray icon) still opens
+  the small popover (`panel`, 272×320). Its **Pond settings** button opens the
+  big window (`pond`, 760×540); `open_pond` hides the popover and the frog
+  overlay, centres the pond, raises it always-on-top and emits
+  `pond-panel-shown` so the frog hops in.
 - `SettingsPond.tsx` draws the lilypad background, the left status HUD and three
-  lilypad buttons (pause nudges, croak sounds, back to desktop).
+  lilypad buttons (pause nudges, croak sounds, back to desktop). Closing via
+  "Back to desktop", Escape or `hide_pond` hides the pond and shows the frog.
 - Stats come from the `frog_stats` command, polled every 2 s: anxiety is the pond
   stress score; focus is `1 − (0.6 × switch pressure + 0.4 if on a feed)`; the
   HUD also lists keys, backspaces, switches, hesitation, reversals, scrolls,
   feed time, idle time and the app in front. History drives the pixel sparklines.
-- On open the panel replays the hop: `pond-panel-shown` triggers a fetch of
-  `frog_anchor` (the frog's current screen point), converts it to panel-local CSS
-  and animates an arc onto a lilypad.
-- `FROG_OPEN_PANEL=1` opens the panel at startup for demos/testing.
+- On open the panel replays the hop: `frog_anchor` gives the frog's current
+  screen point, converted to pond-local CSS, and framer animates an arc onto a
+  lilypad.
+- `FROG_OPEN_PANEL=1` opens the popover at launch and `FROG_OPEN_POND=1` opens
+  the pond directly, both for demos/testing.
 
-The old `ControlPanel.tsx` popover was replaced by `SettingsPond.tsx`.
+The old `ControlPanel` popover is back in place; it just gained the
+**Pond settings** row.
 
 ---
 

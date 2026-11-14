@@ -29,6 +29,21 @@
       {
         "label": "panel",
         "title": "Feeling Frog Controls",
+        "width": 272,
+        "height": 320,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "skipTaskbar": true,
+        "visible": false,
+        "focus": true,
+        "backgroundColor": "#00000000",
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding"
+      },
+      {
+        "label": "pond",
+        "title": "Pond Settings",
         "width": 760,
         "height": 540,
         "resizable": false,

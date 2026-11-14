@@ -222,7 +222,7 @@ export function SettingsPond() {
   }, [hopIn]);
 
   const close = useCallback(() => {
-    void invoke("hide_panel").catch(() => {
+    void invoke("hide_pond").catch(() => {
       void getCurrentWindow().hide();
     });
   }, []);
