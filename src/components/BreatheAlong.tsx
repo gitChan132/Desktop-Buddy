@@ -1,17 +1,12 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState } from "react";
+import { BREATH_PHASES, type BreathPhase } from "../breathing";
 
 /**
  * A slow guided breathing exercise, narrated by the frog while he croaks.
  * Inhale / hold / exhale cycle forever, each with its own line of frog talk.
  */
-type BreathPhase = "inhale" | "hold" | "exhale";
-
-const PHASES: { key: BreathPhase; ms: number; label: string }[] = [
-  { key: "inhale", ms: 6000, label: "breathe in" },
-  { key: "hold", ms: 6000, label: "hold" },
-  { key: "exhale", ms: 9000, label: "breathe out" },
-];
+const PHASES = BREATH_PHASES;
 
 /** Two lines per phase: one for the first round, one for later rounds. */
 const LINES: Record<BreathPhase, [string, string]> = {
@@ -64,9 +59,11 @@ function playCroak() {
 interface BreatheAlongProps {
   open: boolean;
   onClose: () => void;
+  /** Reports the live phase so the frog can mirror the breath. */
+  onPhase: (phase: BreathPhase | null) => void;
 }
 
-export function BreatheAlong({ open, onClose }: BreatheAlongProps) {
+export function BreatheAlong({ open, onClose, onPhase }: BreatheAlongProps) {
   const [phaseIndex, setPhaseIndex] = useState(0);
   const [round, setRound] = useState(1);
   const phase = PHASES[phaseIndex];
@@ -89,6 +86,11 @@ export function BreatheAlong({ open, onClose }: BreatheAlongProps) {
     return () => clearTimeout(id);
   }, [open, phaseIndex]);
 
+  // Keep the frog's cheeks in step with the guide.
+  useEffect(() => {
+    onPhase(open ? phase.key : null);
+  }, [open, phase.key, onPhase]);
+
   // He croaks softly as you breathe out.
   useEffect(() => {
     if (!open) return;
@@ -96,6 +98,10 @@ export function BreatheAlong({ open, onClose }: BreatheAlongProps) {
   }, [open, phaseIndex]);
 
   const line = LINES[phase.key][round === 1 ? 0 : 1];
+
+  // Inhale fills the bar, the hold keeps it full, exhale drains it.
+  const barFrom = phase.key === "inhale" ? "0%" : "100%";
+  const barTo = phase.key === "exhale" ? "0%" : "100%";
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-[130px] z-50 flex flex-col items-center gap-1.5 px-3">
@@ -136,13 +142,16 @@ export function BreatheAlong({ open, onClose }: BreatheAlongProps) {
               </motion.p>
             </AnimatePresence>
 
-            {/* Fills across the current phase at a steady pace. */}
+            {/* Fills as you breathe in, stays full on the hold, drains on the way out. */}
             <div className="mt-2 h-1 overflow-hidden rounded-full bg-emerald-900/10">
               <motion.div
                 key={`${round}-${phase.key}-bar`}
-                initial={{ width: "0%" }}
-                animate={{ width: "100%" }}
-                transition={{ duration: phase.ms / 1000, ease: "linear" }}
+                initial={{ width: barFrom }}
+                animate={{ width: barTo }}
+                transition={{
+                  duration: phase.key === "hold" ? 0 : phase.ms / 1000,
+                  ease: "linear",
+                }}
                 className="h-full rounded-full bg-emerald-500"
               />
             </div>
@@ -159,7 +168,8 @@ export function BreatheAlong({ open, onClose }: BreatheAlongProps) {
                 ))}
               </div>
               <span className="text-[10px] text-emerald-700">
-                6 · 6 · 9 · round {round}
+                {PHASES.map((item) => item.ms / 1000).join(" · ")} · round{" "}
+                {round}
               </span>
             </div>
           </motion.div>

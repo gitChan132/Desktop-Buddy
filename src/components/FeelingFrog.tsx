@@ -8,7 +8,11 @@ import {
 } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import greenSpritesheet from "../assets/frog/green_spritesheet.png";
-import { INTERVENTION_TTL_MS, type FrogInterventionPayload } from "../types";
+import { BREATH_PHASES, type BreathPhase } from "../breathing";
+import {
+  INTERVENTION_TTL_MS,
+  type FrogInterventionPayload,
+} from "../types";
 
 /**
  * Where a hand would grip the frog inside one 32px cell: the centre of the
@@ -73,6 +77,8 @@ interface FeelingFrogProps {
   onGrounding: () => void;
   /** True while the frog is being carried, so the window stays interactive. */
   onCarry: (carrying: boolean) => void;
+  /** Current breath phase of an open guide, or null when it is closed. */
+  breathPhase: BreathPhase | null;
 }
 
 const ACTION_LABEL: Record<FrogInterventionPayload["suggestedAction"], string> =
@@ -125,6 +131,7 @@ export function FeelingFrog({
   intervention,
   onGrounding,
   onCarry,
+  breathPhase,
 }: FeelingFrogProps) {
   const hop = useAnimationControls();
   const lastId = useRef<string | null>(null);
@@ -133,6 +140,8 @@ export function FeelingFrog({
   // frog. Held frogs pose in full extension instead of looping an animation.
   const [held, setHeld] = useState(false);
   const [heldPose, setHeldPose] = useState(0);
+  // Croak-row frame driven by the breathing guide (0 = slack, 2 = full cheeks).
+  const [breathFrame, setBreathFrame] = useState(0);
   // True while he is sailing through the air after being thrown.
   const [flying, setFlying] = useState(false);
   const [flightPose, setFlightPose] = useState(0);
@@ -292,6 +301,35 @@ export function FeelingFrog({
     );
     return () => clearTimeout(id);
   }, [flying, flightPose]);
+
+  // Cheeks follow the guide: fill through the inhale, hold full, release on
+  // the exhale, using the croak row's throat-puff frames.
+  useEffect(() => {
+    if (!breathPhase) {
+      setBreathFrame(0);
+      return;
+    }
+    const step = BREATH_PHASES.find((item) => item.key === breathPhase);
+    if (!step) return;
+
+    const sequence =
+      breathPhase === "inhale"
+        ? [0, 1, 2]
+        : breathPhase === "hold"
+          ? [2]
+          : [2, 1, 0];
+    setBreathFrame(sequence[0]);
+    if (sequence.length < 2) return;
+
+    const perFrame = step.ms / sequence.length;
+    const id = setInterval(() => {
+      setBreathFrame((current) => {
+        const index = sequence.indexOf(current);
+        return sequence[Math.min(index + 1, sequence.length - 1)];
+      });
+    }, perFrame);
+    return () => clearInterval(id);
+  }, [breathPhase]);
 
   // Drag state. The crown offset is fixed for the gesture and the window is
   // positioned from the live cursor every animation frame, rather than from
@@ -459,7 +497,8 @@ export function FeelingFrog({
   const frame = useSpriteFrame(animation, framesPerSecond);
 
   // Carried and airborne poses come from fixed frames rather than the mood
-  // loop: dangling while held, wide-eyed and stretched while thrown.
+  // loop: dangling while held, wide-eyed and stretched while thrown, and the
+  // croak row's throat puff while breathing along.
   const pose = flying
     ? FLIGHT_FRAMES[flightPose]
     : held
@@ -467,10 +506,15 @@ export function FeelingFrog({
           column: ANIMATIONS.jump.column + HELD_FRAMES[heldPose],
           row: ANIMATIONS.jump.row,
         }
-      : {
-          column: ANIMATIONS[animation].column + frame,
-          row: ANIMATIONS[animation].row,
-        };
+      : breathPhase
+        ? {
+            column: ANIMATIONS.croak.column + breathFrame,
+            row: ANIMATIONS.croak.row,
+          }
+        : {
+            column: ANIMATIONS[animation].column + frame,
+            row: ANIMATIONS[animation].row,
+          };
 
   const sheetColumn = pose.column;
   const sheetRow = pose.row;

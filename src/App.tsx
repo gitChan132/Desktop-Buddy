@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
+import type { BreathPhase } from "./breathing";
 import { BreatheAlong } from "./components/BreatheAlong";
 import { FeelingFrog, type FrogMood } from "./components/FeelingFrog";
 import { INTERVENTION_TTL_MS, type FrogInterventionPayload } from "./types";
@@ -58,6 +59,7 @@ export default function App() {
     useState<FrogInterventionPayload | null>(null);
   const [breathingOpen, setBreathingOpen] = useState(false);
   const [carrying, setCarrying] = useState(false);
+  const [breathPhase, setBreathPhase] = useState<BreathPhase | null>(null);
 
   // Keep the whole window interactive while he is being carried or the guide is
   // up; otherwise the hitbox tick can make it click-through mid-drag and drop
@@ -89,6 +91,7 @@ export default function App() {
 
   const closeBreathing = () => {
     setBreathingOpen(false);
+    setBreathPhase(null);
     setIntervention(null);
   };
 
@@ -99,8 +102,13 @@ export default function App() {
         intervention={intervention}
         onGrounding={() => setBreathingOpen(true)}
         onCarry={setCarrying}
+        breathPhase={breathingOpen ? breathPhase : null}
       />
-      <BreatheAlong open={breathingOpen} onClose={closeBreathing} />
+      <BreatheAlong
+        open={breathingOpen}
+        onClose={closeBreathing}
+        onPhase={setBreathPhase}
+      />
     </div>
   );
 }
