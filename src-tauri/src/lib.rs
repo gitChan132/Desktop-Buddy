@@ -1,5 +1,6 @@
 mod ai_engine;
 mod chat;
+mod selection;
 mod settings;
 mod telemetry;
 mod window_tracker;
@@ -433,12 +434,25 @@ fn hide_pond(app: AppHandle) {
     }
     set_main_visible(&app, true);
 }
+
+/// Opens the macOS Accessibility pane so the user can grant the selection
+/// watcher permission to read highlighted text.
+#[tauri::command]
+fn open_accessibility_settings() -> Result<(), String> {
+    tauri_plugin_opener::open_url(
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+        None::<&str>,
+    )
+    .map_err(|error| error.to_string())
+}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             chat::frog_chat,
+            chat::summarize_selection,
+            open_accessibility_settings,
             get_settings,
             set_nudges_paused,
             set_sound_enabled,
@@ -482,6 +496,7 @@ pub fn run() {
                 window.set_always_on_top(true)?;
                 position_bottom_right(&window)?;
             }
+            selection::spawn(app.handle().clone());
             if let Some(panel) = app.get_webview_window("panel") {
                 #[cfg(target_os = "macos")]
                 float_over_fullscreen_spaces(&panel)?;
