@@ -24,7 +24,8 @@
         "shadow": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
-        "backgroundColor": "#00000000"
+        "backgroundColor": "#00000000",
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding"
       }
     ],
     "security": {
