@@ -181,10 +181,10 @@ literal hex values in those classes and match the sprite (`#0b3a1f` ink,
 ### Pond settings window
 
 - The tray menu (**Control panel**, or left-clicking the tray icon) still opens
-  the small popover (`panel`, 272×320). Its **Pond settings** button opens the
-  big window (`pond`, 760×540); `open_pond` hides the popover and the frog
-  overlay, centres the pond, raises it always-on-top and emits
-  `pond-panel-shown` so the frog hops in.
+  the small popover (`panel`, 272×360). Its **Activities**, **Modes** and
+  **Pond settings** buttons open the big window (`pond`, 760×540);
+  `open_pond` hides the popover and the frog overlay, centres the pond, focuses
+  it and emits `pond-panel-shown` so the frog hops in.
 - `SettingsPond.tsx` draws the lilypad background and the left status HUD. The
   pond is a **normal decorated window** (title bar with minimise / maximise /
   close); there are no in-window buttons now. The title-bar X is intercepted in
@@ -192,6 +192,30 @@ literal hex values in those classes and match the sprite (`#0b3a1f` ink,
   Escape does the same via `hide_pond`.
 - The pond background is a single static image (`pond1.png`) with the frog
   landing on its central lilypad at `LAND` in `SettingsPond.tsx`.
+
+### Pond tabs (left column)
+
+The left column switches between four views; the status header has a gear (→
+settings), and the status panel has **Activities** and **Modes** buttons.
+
+- **Status** — anxiety/focus meters + sparklines and the raw counters.
+- **Settings** (gear) — croak sounds, pause nudges, volume, per-trigger toggles
+  and per-activity toggles. Stored in `settings.rs` as two bitmasks
+  (`TRIGGER_BITS`, `ACTIVITY_BITS`); `ai_engine` skips disabled triggers in the
+  chain and filters `pick_suggested_action` to enabled activities.
+- **Activities** — pick one to run right now. A compact runner in the left
+  column shows the line + progress; the pond frog performs it on the lilypad
+  (belly breathing drives the croak-row puff frames via `useBreathFrame`, other
+  activities croak on each new line). Belly breathing loops until **Stop**;
+  the others end on their own.
+- **Modes** — Focus / Chill / Fun buttons with blurbs, local selection only
+  (not wired to behaviour yet, per the brief).
+
+Entry points: the small popover has **Activities** and **Modes** buttons that
+call `open_pond` with a tab. The requested tab is stored in a `(tab, seq)` pair
+and polled by the pond (`pond_tab` command, ~800 ms) because the pond's webview
+may still be loading when the request fires; `open_pond` also emits
+`pond-panel-shown` for the hop replay.
 - Stats come from the `frog_stats` command, polled every 2 s: anxiety is the pond
   stress score; focus is `1 − (0.6 × switch pressure + 0.4 if on a feed)`; the
   HUD also lists keys, backspaces, switches, hesitation, reversals, scrolls,

@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useRef, useState } from "react";
 import { playCroak } from "../croak";
 import {
+  DEFAULT_SETTINGS,
   loadSettings,
   saveNudgesPaused,
   saveSoundEnabled,
@@ -13,11 +14,7 @@ import {
 
 const appWindow = getCurrentWindow();
 
-const DEFAULTS: FrogSettings = {
-  nudgesPaused: false,
-  soundEnabled: true,
-  volume: 0.5,
-};
+const DEFAULTS: FrogSettings = DEFAULT_SETTINGS;
 
 type ToggleRowProps = {
   label: string;
@@ -161,10 +158,27 @@ export function ControlPanel() {
           />
         </div>
 
+        <div className="mt-2 flex gap-1.5">
+          <button
+            type="button"
+            onClick={() => void invoke("open_pond", { tab: "activities" })}
+            className="pixel-button flex-1 px-2 py-1 text-[13px] uppercase leading-none text-emerald-900"
+          >
+            Activities
+          </button>
+          <button
+            type="button"
+            onClick={() => void invoke("open_pond", { tab: "modes" })}
+            className="pixel-button flex-1 px-2 py-1 text-[13px] uppercase leading-none text-emerald-900"
+          >
+            Modes
+          </button>
+        </div>
+
         <button
           type="button"
-          onClick={() => void invoke("open_pond")}
-          className="pixel-button mt-2 w-full px-2 py-1 text-[14px] uppercase leading-none text-emerald-900"
+          onClick={() => void invoke("open_pond", { tab: "status" })}
+          className="pixel-button mt-1.5 w-full px-2 py-1 text-[13px] uppercase leading-none text-emerald-900"
         >
           Pond settings
         </button>

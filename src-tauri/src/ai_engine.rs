@@ -57,7 +57,7 @@ fn doomscroll_scrolls() -> usize {
 }
 
 /// Back-and-forth cursor reversals needed within the oscillation window before
-/// it counts as stress. Set high — ordinary cursor moves flip direction often.
+/// it counts as stress. Set high â€” ordinary cursor moves flip direction often.
 const OSCILLATION_MIN_REVERSALS: usize = 14;
 
 fn shorts_scrolls() -> usize {
@@ -92,7 +92,7 @@ const LLM_TIMEOUT: Duration = Duration::from_secs(15);
 
 const SYSTEM_PROMPT: &str = "You are The Feeling Frog, an empathetic, cozy amphibian desktop companion. \
 The user is showing signs of burnout at their computer; you notice the pattern but never scold. \
-Speak gently and warmly, with occasional subtle frog charm (a soft *ribbit* now and then) — never annoying, \
+Speak gently and warmly, with occasional subtle frog charm (a soft *ribbit* now and then) â€” never annoying, \
 never nagging, never a lecture. Never use pet names or terms of endearment (no \"little friend\", \"dear\", \
 \"buddy\", \"my friend\", \"little one\"); address the user plainly and directly. You are given a `detected` \
 field describing exactly what gave them away; weave that detail into your message in a light, humorous way \
@@ -147,8 +147,11 @@ fn build_intervention(
     // Short-form video earns the fast 30-second rule; everything else uses the
     // four-minute doomscroll gate.
     let short_form = is_short_form_scroll(windows, scrolls);
+    // The pond can mute individual detectors.
+    let on = |id: &str| settings::trigger_enabled(id);
 
-    let (trigger, message, suggested_action) = if short_form
+    let (trigger, message, suggested_action) = if on("doomscroll")
+        && short_form
         && typing.keys_in_window < DOOMSCROLL_MAX_KEYS
     {
         // Checked first: flipping Shorts looks like cursor thrashing to the
@@ -161,9 +164,8 @@ fn build_intervention(
             ),
             "visual_grounding",
         )
-    } else if typing.backspaces_in_window >= 36
-        || typing.backspace_streak >= 8
-    {
+    } else if on("backspace_loop") && (typing.backspaces_in_window >= 36
+        || typing.backspace_streak >= 8) {
         (
             "backspace_loop",
             format!(
@@ -172,34 +174,35 @@ fn build_intervention(
             ),
             "belly_breathe",
         )
-    } else if typing.keys_in_window >= 180 {
+    } else if on("frantic_typing") && typing.keys_in_window >= 180 {
         (
             "frantic_typing",
             format!(
-                "*ribbit* {} keystrokes in 30 seconds — your keys are hopping faster than me. Let's slow the pond down for one breath.",
+                "*ribbit* {} keystrokes in 30 seconds â€” your keys are hopping faster than me. Let's slow the pond down for one breath.",
                 typing.keys_in_window
             ),
             "belly_breathe",
         )
-    } else if windows.hesitant_clicks >= 3 {
+    } else if on("cursor_hesitation") && windows.hesitant_clicks >= 3 {
         (
             "cursor_hesitation",
             format!(
-                "*ribbit* That cursor rested a while before clicking — {} hesitant clicks in the last 30 seconds. Your pond has plenty of lily pads; take one slow breath and pick one.",
+                "*ribbit* That cursor rested a while before clicking â€” {} hesitant clicks in the last 30 seconds. Your pond has plenty of lily pads; take one slow breath and pick one.",
                 windows.hesitant_clicks
             ),
             "belly_breathe",
         )
-    } else if windows.direction_reversals >= OSCILLATION_MIN_REVERSALS {
+    } else if on("cursor_oscillation") && windows.direction_reversals >= OSCILLATION_MIN_REVERSALS {
         (
             "cursor_oscillation",
             format!(
-                "*ribbit* Your cursor is hopping back and forth across the pond — {} reversals in a few seconds. When you can't pick a lily pad, start with the smallest one and breathe.",
+                "*ribbit* Your cursor is hopping back and forth across the pond â€” {} reversals in a few seconds. When you can't pick a lily pad, start with the smallest one and breathe.",
                 windows.direction_reversals
             ),
             "belly_breathe",
         )
-    } else if windows.on_feed
+    } else if on("doomscroll")
+        && windows.on_feed
         && typing.keys_in_window < DOOMSCROLL_MAX_KEYS
         && windows.feed_seconds >= doomscroll_seconds()
         && scrolls.scrolls_in_window >= doomscroll_scrolls()
@@ -213,7 +216,7 @@ fn build_intervention(
             ),
             "visual_grounding",
         )
-    } else if windows.tab_thrashing {
+    } else if on("tab_thrashing") && windows.tab_thrashing {
         (
             "tab_thrashing",
             format!(
@@ -222,7 +225,7 @@ fn build_intervention(
             ),
             "task_intent",
         )
-    } else if windows.idle_freeze {
+    } else if on("idle_freeze") && windows.idle_freeze {
         (
             "idle_freeze",
             "*ribbit* Two and a half minutes, no keys and no mouse, and the editor still has you. Look away from the screen and let the pond settle.".to_string(),
@@ -340,14 +343,24 @@ fn suggested_action_for(trigger: &str) -> &'static str {
 /// sub-second wall-clock entropy, so no extra RNG dependency is needed.
 fn pick_suggested_action(trigger: &str) -> &'static str {
     let actions = suggested_actions_for(trigger);
-    if actions.len() == 1 {
+    let enabled: Vec<&'static str> = actions
+        .iter()
+        .copied()
+        .filter(|action| settings::activity_enabled(action))
+        .collect();
+    if enabled.is_empty() {
+        // Everything suitable is switched off; keep the deterministic fallback
+        // so the nudge still has something to open.
         return actions[0];
+    }
+    if enabled.len() == 1 {
+        return enabled[0];
     }
     let seed = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.subsec_nanos() as usize)
         .unwrap_or(0);
-    actions[seed % actions.len()]
+    enabled[seed % enabled.len()]
 }
 
 /// Reads `GEMINI_API_KEY`, loading `.env.local` when the app was started without it.
@@ -479,7 +492,7 @@ pub async fn trigger_frog_intervention(
     match ask_llm(&trigger, &window_title, &detected).await {
         Ok(reply) => {
             payload.message = reply.message;
-            // The trigger→activity mapping is authoritative: each activity has its
+            // The triggerâ†’activity mapping is authoritative: each activity has its
             // own detection signal, so the model only writes the copy.
             payload.suggested_action = pick_suggested_action(&trigger).to_string();
         }

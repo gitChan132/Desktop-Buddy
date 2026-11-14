@@ -4,6 +4,7 @@ mod settings;
 mod telemetry;
 mod window_tracker;
 
+use std::sync::Mutex;
 use tauri::{
     image::Image,
     menu::{CheckMenuItem, Menu, MenuItem, MenuItemKind, PredefinedMenuItem},
@@ -288,6 +289,18 @@ fn set_sound_volume(app: AppHandle, volume: f32) {
 }
 
 #[tauri::command]
+fn set_trigger_enabled(app: AppHandle, trigger: String, enabled: bool) {
+    settings::set_trigger_enabled(&trigger, enabled);
+    broadcast_settings(&app);
+}
+
+#[tauri::command]
+fn set_activity_enabled(app: AppHandle, activity: String, enabled: bool) {
+    settings::set_activity_enabled(&activity, enabled);
+    broadcast_settings(&app);
+}
+
+#[tauri::command]
 fn quit_app(app: AppHandle) {
     app.exit(0);
 }
@@ -362,10 +375,41 @@ fn frog_anchor(app: AppHandle) -> Option<FrogAnchor> {
     })
 }
 
+/// Which pond tab the popover last asked for, plus a sequence number so the
+/// pond can notice repeat requests even when the tab is unchanged.
+static POND_TAB: Mutex<String> = Mutex::new(String::new());
+static POND_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn set_pond_tab(tab: &str) {
+    if let Ok(mut current) = POND_TAB.lock() {
+        current.clear();
+        current.push_str(tab);
+    }
+    POND_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PondTab {
+    tab: String,
+    seq: u64,
+}
+
+#[tauri::command]
+fn pond_tab() -> PondTab {
+    PondTab {
+        tab: POND_TAB
+            .lock()
+            .map(|tab| tab.clone())
+            .unwrap_or_else(|_| "status".to_string()),
+        seq: POND_SEQ.load(std::sync::atomic::Ordering::Relaxed),
+    }
+}
+
 /// Opens the big pond window from the small popover: hide the popover and the
 /// frog overlay, centre the pond, raise it and let the frog hop in.
 #[tauri::command]
-fn open_pond(app: AppHandle) {
+fn open_pond(app: AppHandle, tab: Option<String>) {
     if let Some(panel) = app.get_webview_window(PANEL_LABEL) {
         let _ = panel.hide();
     }
@@ -376,7 +420,9 @@ fn open_pond(app: AppHandle) {
     position_pond_center(&pond);
     let _ = pond.show();
     let _ = pond.set_focus();
-    let _ = app.emit(PANEL_OPENED_EVENT, ());
+    let tab = tab.unwrap_or_else(|| "status".to_string());
+    set_pond_tab(&tab);
+    let _ = app.emit(PANEL_OPENED_EVENT, tab);
 }
 
 /// Closes the pond and brings the frog back to the desktop.
@@ -397,11 +443,14 @@ pub fn run() {
             set_nudges_paused,
             set_sound_enabled,
             set_sound_volume,
+            set_trigger_enabled,
+            set_activity_enabled,
             quit_app,
             frog_stats,
             frog_anchor,
             open_pond,
-            hide_pond
+            hide_pond,
+            pond_tab
         ])
         .setup(|app| {
             // macOS: live only in the menu bar — no Dock tile, no Cmd-Tab entry.
@@ -461,7 +510,7 @@ pub fn run() {
                 toggle_panel(app.handle(), None);
             }
             if std::env::var("FROG_OPEN_POND").is_ok() {
-                open_pond(app.handle().clone());
+                open_pond(app.handle().clone(), None);
             }
             Ok(())
         })

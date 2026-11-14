@@ -30,7 +30,7 @@
         "label": "panel",
         "title": "Feeling Frog Controls",
         "width": 272,
-        "height": 320,
+        "height": 360,
         "resizable": false,
         "decorations": false,
         "transparent": true,
