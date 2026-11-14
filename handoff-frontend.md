@@ -13,12 +13,14 @@ lives there.
 
 At the time of writing:
 
-- `origin/main` is at **`e5353db`** "Bounce the frog off the screen edges, not the window box".
-- There are **4 uncommitted frontend files** (see §3): the breathing bar direction
-  and the cheek-puff sync. Nothing else is dirty.
-- `npx tsc --noEmit` passes; `cargo check` passes.
-- The app runs and every behaviour below has been verified in the real Tauri
-  window (screenshots + window-rect probing), not just in a browser tab.
+- `origin/main` now includes "Add cursor hesitation and oscillation detection"; the rig
+  work below is all committed and the working tree is clean.
+- The backend detects **six** triggers — `frantic_typing`, `backspace_loop`,
+  `tab_thrashing`, `idle_freeze`, plus the new `cursor_hesitation` and
+  `cursor_oscillation` (see `scope.md` / `handoff.md`).
+- `npx tsc --noEmit`, `npm run build`, and `cargo test --lib` (35 tests) all pass.
+- The app runs and every behaviour below has been verified in the real Tauri window, not
+  just in a browser tab.
 
 Recent history (newest first):
 
@@ -64,9 +66,9 @@ full-screen breathing modal.
 
 ---
 
-## 3. Uncommitted work (the "catch up" part)
+## 3. Recently landed frontend work
 
-Working tree changes on top of `e5353db`:
+Now committed on `main`:
 
 1. **Breathing bar now breathes instead of looping.**
    `BreatheAlong.tsx` sets `barFrom`/`barTo`: 0→100% on inhale, stays 100% on
@@ -189,7 +191,7 @@ Rust emits `cursor-pos` and `pond-stress` too; the frontend does **not** consume
 them yet (candidate for stress-reactive moods).
 
 `FrogInterventionPayload` (`src/types.ts`): `id`, `trigger`
-(`frantic_typing | backspace_loop | tab_thrashing | idle_freeze`), `severity`,
+(`frantic_typing | backspace_loop | tab_thrashing | idle_freeze | cursor_hesitation | cursor_oscillation`), `severity`,
 `message`, `suggestedAction` (`belly_breathe | lily_pad_step | pond_stretch`),
 optional `activeApp`. All three actions currently open the same breathing guide.
 
@@ -218,16 +220,18 @@ optional `activeApp`. All three actions currently open the same breathing guide.
 
 ## 7. Running it
 
-```powershell
-# from the repo root, best launched detached so it survives the shell
-cmd /c start "DeskBuddy dev" cmd /c "cd /d C:\Users\Alex\Documents\hack2026\DeskBuddy && set PATH=%USERPROFILE%\.cargo\bin;%PATH% && npm run tauri dev > %TEMP%\deskbuddy-dev.log 2>&1"
+```bash
+# from the repo root (macOS; grant Accessibility to the launching terminal)
+npm run tauri dev
 ```
 
-- Vite on **port 1420** (`strictPort`).
-- Typecheck: `npx tsc --noEmit` · Rust: `cargo check --manifest-path src-tauri/Cargo.toml`.
+- Vite on **port 1420** (`strictPort`); free it first if a stray dev server survives:
+  `lsof -ti tcp:1420 | xargs kill -9`.
+- Typecheck: `npx tsc --noEmit` · Rust tests: `cd src-tauri && cargo test --lib`.
 - Frontend edits hot-reload; Rust/config edits rebuild and restart automatically.
-- The dev log redirect can go stale after restarts — trust
-  `Get-Process desktop-buddy` + a screen capture over log tails.
+- Kill strays when done: `pkill -f "tauri dev"; pkill -f desktop-buddy; pkill -f vite`.
+- §6.4/§6.5 (transient-shell death, 125% DPI offsets) were Windows-era notes; this repo
+  now runs on macOS.
 
 LLM interventions need whatever `.env.local` / API key the backend expects; the
 engine is expected to fall back to canned messages without one.
