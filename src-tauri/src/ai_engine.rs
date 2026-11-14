@@ -6,7 +6,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
-use crate::telemetry::{self, TypingSnapshot};
+use crate::telemetry::{self, ScrollSnapshot, TypingSnapshot};
 use crate::window_tracker::{self, WindowSnapshot};
 
 const EVALUATION_INTERVAL: Duration = Duration::from_secs(20);
@@ -21,6 +21,27 @@ fn evaluation_interval() -> Duration {
 }
 /// Don't nudge the user more often than this.
 const INTERVENTION_COOLDOWN: Duration = Duration::from_secs(5 * 60);
+
+/// Doomscroll gate: minutes on one feed window, and wheel events in the last
+/// 90 seconds. Both have env overrides for fast e2e checks.
+const DOOMSCROLL_SECONDS: u64 = 4 * 60;
+const DOOMSCROLL_SCROLLS: usize = 40;
+/// Any more typing than this means they are working, not scrolling.
+const DOOMSCROLL_MAX_KEYS: usize = 10;
+
+fn doomscroll_seconds() -> u64 {
+    std::env::var("FROG_DOOMSCROLL_SECS")
+        .ok()
+        .and_then(|secs| secs.parse().ok())
+        .unwrap_or(DOOMSCROLL_SECONDS)
+}
+
+fn doomscroll_scrolls() -> usize {
+    std::env::var("FROG_DOOMSCROLL_SCROLLS")
+        .ok()
+        .and_then(|count| count.parse().ok())
+        .unwrap_or(DOOMSCROLL_SCROLLS)
+}
 
 const EVENT_NAME: &str = "trigger-intervention";
 
@@ -75,6 +96,7 @@ fn next_id() -> String {
 fn build_intervention(
     typing: &TypingSnapshot,
     windows: &WindowSnapshot,
+    scrolls: &ScrollSnapshot,
 ) -> Option<FrogInterventionPayload> {
     // Normalized 0.0..=1.0 score computed by the telemetry engine and folded into
     // the window snapshot.
@@ -128,6 +150,20 @@ fn build_intervention(
             ),
             "lily_pad_step",
         )
+    } else if windows.on_feed
+        && windows.feed_seconds >= doomscroll_seconds()
+        && scrolls.scrolls_in_window >= doomscroll_scrolls()
+        && typing.keys_in_window < DOOMSCROLL_MAX_KEYS
+    {
+        let minutes = (windows.feed_seconds / 60).max(1);
+        (
+            "doomscroll",
+            format!(
+                "*ribbit* {minutes} minutes of feed, {} scrolls, and not one word typed. That app is not a lily pad. Put it down and let your eyes rest on something that isn't glowing — I'm not asking twice.",
+                scrolls.scrolls_in_window
+            ),
+            "pond_stretch",
+        )
     } else if windows.idle_freeze {
         (
             "idle_freeze",
@@ -154,6 +190,7 @@ fn detection_detail(
     trigger: &str,
     typing: &TypingSnapshot,
     windows: &WindowSnapshot,
+    scrolls: &ScrollSnapshot,
 ) -> String {
     match trigger {
         "backspace_loop" => format!(
@@ -175,6 +212,16 @@ fn detection_detail(
         "tab_thrashing" => format!(
             "{} window switches in the last 20 seconds",
             windows.switches_in_window
+        ),
+        "doomscroll" => format!(
+            "{} minutes on {} with {} scrolls in the last 90 seconds and no typing",
+            windows.feed_seconds / 60,
+            windows
+                .active_app
+                .as_ref()
+                .map(|app| app.app_name.clone())
+                .unwrap_or_else(|| "a feed".to_string()),
+            scrolls.scrolls_in_window,
         ),
         "idle_freeze" => "2.5 minutes with no keyboard or mouse input".to_string(),
         other => other.to_string(),
@@ -209,6 +256,7 @@ fn suggested_action_for(trigger: &str) -> &'static str {
         "tab_thrashing" => "lily_pad_step",
         "cursor_hesitation" => "lily_pad_step",
         "cursor_oscillation" => "pond_stretch",
+        "doomscroll" => "pond_stretch",
         _ => "pond_stretch",
     }
 }
@@ -237,8 +285,19 @@ fn build_llm_request(trigger: &str, window_title: &str, detected: &str) -> serde
         "detected": detected,
     });
 
+    // Doomscrolling is the one time the frog is allowed to be stern.
+    let system = if trigger == "doomscroll" {
+        format!(
+            "{SYSTEM_PROMPT} For this trigger the user has been doomscrolling for far too long. \
+Drop the gentle tone: be playfully stern and disappointed, like a friend who has had enough. \
+Tell them plainly to close the feed, in one short sentence, still with a little frog flourish."
+        )
+    } else {
+        SYSTEM_PROMPT.to_string()
+    };
+
     serde_json::json!({
-        "system_instruction": { "parts": [{ "text": SYSTEM_PROMPT }] },
+        "system_instruction": { "parts": [{ "text": system }] },
         "contents": [{
             "role": "user",
             "parts": [{ "text": observation.to_string() }]
@@ -356,8 +415,9 @@ pub fn start(app: AppHandle) {
 
             let typing = telemetry::snapshot();
             let windows = window_tracker::snapshot();
+            let scrolls = telemetry::scroll_snapshot();
             eprintln!(
-                "[ai_engine] tick keys={} backspaces={} streak={} switches={} thrash={} idle={} hesit={} rev={} stress={:.2}",
+                "[ai_engine] tick keys={} backspaces={} streak={} switches={} thrash={} idle={} hesit={} rev={} feed={}({}s) scrolls={} stress={:.2}",
                 typing.keys_in_window,
                 typing.backspaces_in_window,
                 typing.backspace_streak,
@@ -366,10 +426,13 @@ pub fn start(app: AppHandle) {
                 windows.idle_freeze,
                 windows.hesitant_clicks,
                 windows.direction_reversals,
+                windows.on_feed,
+                windows.feed_seconds,
+                scrolls.scrolls_in_window,
                 windows.stress_score
             );
 
-            let Some(candidate) = build_intervention(&typing, &windows) else {
+            let Some(candidate) = build_intervention(&typing, &windows, &scrolls) else {
                 continue;
             };
 
@@ -378,7 +441,7 @@ pub fn start(app: AppHandle) {
                 .as_ref()
                 .map(|app| app.title.clone())
                 .unwrap_or_default();
-            let detected = detection_detail(&candidate.trigger, &typing, &windows);
+            let detected = detection_detail(&candidate.trigger, &typing, &windows, &scrolls);
 
             tauri::async_runtime::block_on(trigger_frog_intervention(
                 app.clone(),
@@ -423,7 +486,7 @@ mod tests {
             stress_score: 0.5,
             ..Default::default()
         };
-        assert!(build_intervention(&TypingSnapshot::default(), &windows).is_none());
+        assert!(build_intervention(&TypingSnapshot::default(), &windows, &ScrollSnapshot::default()).is_none());
     }
 
     #[test]
@@ -432,7 +495,7 @@ mod tests {
             backspaces_in_window: 24,
             ..Default::default()
         };
-        let payload = build_intervention(&typing, &WindowSnapshot::default()).unwrap();
+        let payload = build_intervention(&typing, &WindowSnapshot::default(), &ScrollSnapshot::default()).unwrap();
         assert_eq!(payload.trigger, "backspace_loop");
         assert_eq!(payload.suggested_action, "belly_breathe");
     }
@@ -443,7 +506,7 @@ mod tests {
             backspace_streak: 6,
             ..Default::default()
         };
-        let payload = build_intervention(&typing, &WindowSnapshot::default()).unwrap();
+        let payload = build_intervention(&typing, &WindowSnapshot::default(), &ScrollSnapshot::default()).unwrap();
         assert_eq!(payload.trigger, "backspace_loop");
     }
 
@@ -453,7 +516,7 @@ mod tests {
             keys_in_window: 180,
             ..Default::default()
         };
-        let payload = build_intervention(&typing, &WindowSnapshot::default()).unwrap();
+        let payload = build_intervention(&typing, &WindowSnapshot::default(), &ScrollSnapshot::default()).unwrap();
         assert_eq!(payload.trigger, "frantic_typing");
         assert_eq!(payload.suggested_action, "pond_stretch");
     }
@@ -465,7 +528,7 @@ mod tests {
             mean_hesitation_secs: 2.4,
             ..Default::default()
         };
-        let payload = build_intervention(&TypingSnapshot::default(), &windows).unwrap();
+        let payload = build_intervention(&TypingSnapshot::default(), &windows, &ScrollSnapshot::default()).unwrap();
         assert_eq!(payload.trigger, "cursor_hesitation");
         assert_eq!(payload.suggested_action, "lily_pad_step");
     }
@@ -477,7 +540,7 @@ mod tests {
             mean_hesitation_secs: 2.5,
             ..Default::default()
         };
-        let detail = detection_detail("cursor_hesitation", &TypingSnapshot::default(), &windows);
+        let detail = detection_detail("cursor_hesitation", &TypingSnapshot::default(), &windows, &ScrollSnapshot::default());
         assert!(detail.contains("4 hesitant clicks"));
     }
 
@@ -487,7 +550,7 @@ mod tests {
             direction_reversals: 6,
             ..Default::default()
         };
-        let payload = build_intervention(&TypingSnapshot::default(), &windows).unwrap();
+        let payload = build_intervention(&TypingSnapshot::default(), &windows, &ScrollSnapshot::default()).unwrap();
         assert_eq!(payload.trigger, "cursor_oscillation");
         assert_eq!(payload.suggested_action, "pond_stretch");
     }
@@ -498,7 +561,7 @@ mod tests {
             direction_reversals: 7,
             ..Default::default()
         };
-        let detail = detection_detail("cursor_oscillation", &TypingSnapshot::default(), &windows);
+        let detail = detection_detail("cursor_oscillation", &TypingSnapshot::default(), &windows, &ScrollSnapshot::default());
         assert!(detail.contains("7 back-and-forth"));
     }
 
@@ -509,7 +572,7 @@ mod tests {
             switches_in_window: 9,
             ..Default::default()
         };
-        let payload = build_intervention(&TypingSnapshot::default(), &windows).unwrap();
+        let payload = build_intervention(&TypingSnapshot::default(), &windows, &ScrollSnapshot::default()).unwrap();
         assert_eq!(payload.trigger, "tab_thrashing");
         assert_eq!(payload.suggested_action, "lily_pad_step");
     }
@@ -520,7 +583,7 @@ mod tests {
             idle_freeze: true,
             ..Default::default()
         };
-        let payload = build_intervention(&TypingSnapshot::default(), &windows).unwrap();
+        let payload = build_intervention(&TypingSnapshot::default(), &windows, &ScrollSnapshot::default()).unwrap();
         assert_eq!(payload.trigger, "idle_freeze");
     }
 
@@ -536,7 +599,7 @@ mod tests {
             idle_freeze: true,
             ..Default::default()
         };
-        let payload = build_intervention(&typing, &windows).unwrap();
+        let payload = build_intervention(&typing, &windows, &ScrollSnapshot::default()).unwrap();
         assert_eq!(payload.trigger, "backspace_loop");
     }
 
@@ -546,7 +609,7 @@ mod tests {
             backspaces_in_window: 40,
             ..Default::default()
         };
-        let detail = detection_detail("backspace_loop", &typing, &WindowSnapshot::default());
+        let detail = detection_detail("backspace_loop", &typing, &WindowSnapshot::default(), &ScrollSnapshot::default());
         assert_eq!(detail, "40 backspaces in the last 30 seconds");
     }
 
@@ -558,7 +621,82 @@ mod tests {
         assert_eq!(suggested_action_for("idle_freeze"), "pond_stretch");
         assert_eq!(suggested_action_for("cursor_hesitation"), "lily_pad_step");
         assert_eq!(suggested_action_for("cursor_oscillation"), "pond_stretch");
+        assert_eq!(suggested_action_for("doomscroll"), "pond_stretch");
         assert_eq!(suggested_action_for("unknown"), "pond_stretch");
+    }
+
+    #[test]
+    fn doomscroll_detected_on_long_feed_scroll_without_typing() {
+        let windows = WindowSnapshot {
+            on_feed: true,
+            feed_seconds: DOOMSCROLL_SECONDS,
+            ..Default::default()
+        };
+        let scrolls = ScrollSnapshot {
+            scrolls_in_window: DOOMSCROLL_SCROLLS,
+        };
+        let payload = build_intervention(
+            &TypingSnapshot::default(),
+            &windows,
+            &scrolls,
+        )
+        .unwrap();
+        assert_eq!(payload.trigger, "doomscroll");
+        assert_eq!(payload.suggested_action, "pond_stretch");
+        assert!(payload.message.contains("scrolls"));
+    }
+
+    #[test]
+    fn doomscroll_ignored_when_typing_short_or_not_a_feed() {
+        let scrolls = ScrollSnapshot {
+            scrolls_in_window: DOOMSCROLL_SCROLLS,
+            ..Default::default()
+        };
+        let feed = WindowSnapshot {
+            on_feed: true,
+            feed_seconds: DOOMSCROLL_SECONDS,
+            ..Default::default()
+        };
+
+        let typing = TypingSnapshot {
+            keys_in_window: DOOMSCROLL_MAX_KEYS,
+            ..Default::default()
+        };
+        assert!(build_intervention(&typing, &feed, &scrolls).is_none());
+
+        let short = WindowSnapshot {
+            feed_seconds: DOOMSCROLL_SECONDS - 1,
+            ..feed.clone()
+        };
+        assert!(build_intervention(&TypingSnapshot::default(), &short, &scrolls).is_none());
+
+        let elsewhere = WindowSnapshot {
+            on_feed: false,
+            ..feed.clone()
+        };
+        assert!(build_intervention(&TypingSnapshot::default(), &elsewhere, &scrolls).is_none());
+
+        let barely_scrolled = ScrollSnapshot {
+            scrolls_in_window: DOOMSCROLL_SCROLLS - 1,
+            ..Default::default()
+        };
+        assert!(
+            build_intervention(&TypingSnapshot::default(), &feed, &barely_scrolled).is_none()
+        );
+    }
+
+    #[test]
+    fn doomscroll_prompt_turns_sterner() {
+        let calm = build_llm_request("backspace_loop", "Docs", "40 backspaces");
+        let stern = build_llm_request("doomscroll", "Reddit", "9 minutes of scrolling");
+        let calm_system = calm["system_instruction"]["parts"][0]["text"]
+            .as_str()
+            .unwrap();
+        let stern_system = stern["system_instruction"]["parts"][0]["text"]
+            .as_str()
+            .unwrap();
+        assert!(stern_system.contains("doomscrolling"));
+        assert!(stern_system.len() > calm_system.len());
     }
 
     #[test]

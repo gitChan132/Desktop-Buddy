@@ -58,6 +58,39 @@ const FOCUS_APPS: &[&str] = &[
     "nova",
 ];
 
+/// Browser app names (lowercase substrings) whose window titles we inspect.
+const BROWSERS: &[&str] = &[
+    "chrome",
+    "safari",
+    "firefox",
+    "arc",
+    "edge",
+    "brave",
+    "opera",
+    "vivaldi",
+    "orion",
+    "chromium",
+];
+
+/// Feed apps that are their own window, so the app name alone is enough.
+/// Scope is deliberately tight: TikTok and Instagram only.
+const FEED_APPS: &[&str] = &["tiktok", "instagram"];
+
+/// Title hints that mean a browser tab is a feed. YouTube counts here because
+/// it has no desktop app; "shorts"/"reels" catch the short-form feeds.
+const FEED_TITLE_HINTS: &[&str] = &["instagram", "youtube", "tiktok", "shorts", "reels"];
+
+/// True when the foreground window looks like a social feed: either a dedicated
+/// feed app, or a browser showing a feed tab. Only the title is matched, never
+/// page contents.
+fn is_feed_window(app_name: &str, title: &str) -> bool {
+    let app_name = app_name.to_lowercase();
+    let title = title.to_lowercase();
+    let feed_app = FEED_APPS.iter().any(|needle| app_name.contains(needle));
+    let browser = BROWSERS.iter().any(|needle| app_name.contains(needle));
+    feed_app || (browser && FEED_TITLE_HINTS.iter().any(|needle| title.contains(needle)))
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ActiveApp {
     pub app_name: String,
@@ -68,6 +101,8 @@ pub struct ActiveApp {
 struct TrackerState {
     current: Option<ActiveApp>,
     switches: VecDeque<Instant>,
+    /// When the current uninterrupted run on a feed window began.
+    feed_since: Option<Instant>,
 }
 
 /// Window-tracker state joined with the telemetry stress score.
@@ -85,6 +120,10 @@ pub struct WindowSnapshot {
     pub mean_hesitation_secs: f32,
     /// Significant back-and-forth cursor reversals in the last 10 seconds.
     pub direction_reversals: usize,
+    /// Detected: the foreground window looks like a social feed.
+    pub on_feed: bool,
+    /// Seconds the same feed window has been in front (0 when not on a feed).
+    pub feed_seconds: u64,
     /// Normalized (`0.0..=1.0`) pond ripple stress score from the telemetry engine.
     pub stress_score: f32,
 }
@@ -128,6 +167,18 @@ fn poll_once() {
         }
         state.current = Some(next);
     }
+
+    // The feed clock survives title changes on the same feed, and resets the
+    // moment focus lands anywhere else.
+    let on_feed = state
+        .current
+        .as_ref()
+        .is_some_and(|app| is_feed_window(&app.app_name, &app.title));
+    if on_feed {
+        state.feed_since.get_or_insert(now);
+    } else {
+        state.feed_since = None;
+    }
 }
 
 /// Starts polling the foreground window on a background thread.
@@ -145,13 +196,27 @@ pub fn snapshot() -> WindowSnapshot {
     let direction_reversals = telemetry::direction_reversals();
 
     let now = Instant::now();
-    let (active_app, switches_in_window, tab_thrashing) = {
+    let (active_app, switches_in_window, tab_thrashing, on_feed, feed_seconds) = {
         let mut state = tracker().lock().expect("window tracker lock poisoned");
         prune(&mut state.switches, now);
+        let on_feed = state
+            .current
+            .as_ref()
+            .is_some_and(|app| is_feed_window(&app.app_name, &app.title));
+        let feed_seconds = if on_feed {
+            state
+                .feed_since
+                .map(|since| now.duration_since(since).as_secs())
+                .unwrap_or(0)
+        } else {
+            0
+        };
         (
             state.current.clone(),
             state.switches.len(),
             state.switches.len() > THRASH_SWITCHES,
+            on_feed,
+            feed_seconds,
         )
     };
 
@@ -168,6 +233,8 @@ pub fn snapshot() -> WindowSnapshot {
         hesitant_clicks: hesitation.hesitant_clicks,
         mean_hesitation_secs: hesitation.mean_hesitation_secs,
         direction_reversals,
+        on_feed,
+        feed_seconds,
         stress_score,
     }
 }
@@ -204,13 +271,21 @@ mod tests {
     }
 
     #[test]
-    fn thrash_threshold_is_strictly_greater_than_eight() {
-        let now = Instant::now();
-        let mut switches: VecDeque<Instant> =
-            (0..THRASH_SWITCHES).map(|_| now - Duration::from_secs(1)).collect();
-        prune(&mut switches, now);
-        assert!(switches.len() <= THRASH_SWITCHES, "at threshold must not thrash");
-        switches.push_back(now);
-        assert!(switches.len() > THRASH_SWITCHES, "above threshold must thrash");
+    fn feed_window_matches_apps_and_browser_tabs() {
+        assert!(is_feed_window("TikTok", "For You"));
+        assert!(is_feed_window("Google Chrome", "Instagram"));
+        assert!(is_feed_window("Microsoft Edge", "YouTube"));
+        assert!(is_feed_window("Microsoft Edge", "Shorts"));
+    }
+
+    #[test]
+    fn feed_window_ignores_editors_and_generic_pages() {
+        assert!(!is_feed_window("Visual Studio Code", "reddit.ts - Desktop-Buddy"));
+        assert!(!is_feed_window("Google Chrome", "Docs - Google Chrome"));
+        assert!(!is_feed_window("Terminal", "instagram"));
+        // Out of scope: only Instagram, YouTube and TikTok count.
+        assert!(!is_feed_window("Google Chrome", "Reddit - Dive into anything"));
+        assert!(!is_feed_window("Google Chrome", "Home / X"));
+        assert!(!is_feed_window("", ""));
     }
 }

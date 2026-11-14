@@ -69,7 +69,7 @@ const SPRITE_BOX = { left: 7, top: 11, right: 25, bottom: 31 };
 /** The sprite button sits `bottom-3` above the window's bottom edge. */
 const FROG_BOTTOM_INSET = 12;
 
-export type FrogMood = "idle" | "curious" | "croaking";
+export type FrogMood = "idle" | "curious" | "croaking" | "grumpy";
 
 interface FeelingFrogProps {
   mood: FrogMood;
@@ -491,14 +491,15 @@ export function FeelingFrog({
 
   const croaking = mood === "croaking";
   const curious = mood === "curious";
+  const grumpy = mood === "grumpy";
   // Croaking along runs slow and deliberate; curiosity is a quicker riff.
   const animation: AnimationName = croaking || curious ? "croak" : "idle";
   const framesPerSecond = croaking ? 2.5 : curious ? 8 : 6;
   const frame = useSpriteFrame(animation, framesPerSecond);
 
   // Carried and airborne poses come from fixed frames rather than the mood
-  // loop: dangling while held, wide-eyed and stretched while thrown, and the
-  // croak row's throat puff while breathing along.
+  // loop: dangling while held, wide-eyed and stretched while thrown, the croak
+  // row's throat puff while breathing along, and a glare when he is cross.
   const pose = flying
     ? FLIGHT_FRAMES[flightPose]
     : held
@@ -511,10 +512,17 @@ export function FeelingFrog({
             column: ANIMATIONS.croak.column + breathFrame,
             row: ANIMATIONS.croak.row,
           }
-        : {
-            column: ANIMATIONS[animation].column + frame,
-            row: ANIMATIONS[animation].row,
-          };
+        : grumpy
+          ? {
+              // Shock row, wide-eyed upright frame: the closest thing the
+              // sheet has to an annoyed glare.
+              column: ANIMATIONS.shock.column + 1,
+              row: ANIMATIONS.shock.row,
+            }
+          : {
+              column: ANIMATIONS[animation].column + frame,
+              row: ANIMATIONS[animation].row,
+            };
 
   const sheetColumn = pose.column;
   const sheetRow = pose.row;
@@ -581,7 +589,7 @@ export function FeelingFrog({
         />
         <span
           aria-hidden
-          className="absolute inset-0"
+          className={grumpy ? "absolute inset-0 pixel-shake" : "absolute inset-0"}
           style={{
             backgroundImage: `url(${greenSpritesheet})`,
             backgroundSize: `${SHEET_COLUMNS * RENDER_SIZE}px ${SHEET_COLUMNS * RENDER_SIZE}px`,

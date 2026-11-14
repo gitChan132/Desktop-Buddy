@@ -1,4 +1,4 @@
-export type BurnoutTrigger = 'frantic_typing' | 'backspace_loop' | 'tab_thrashing' | 'idle_freeze' | 'cursor_hesitation' | 'cursor_oscillation';
+export type BurnoutTrigger = 'frantic_typing' | 'backspace_loop' | 'tab_thrashing' | 'idle_freeze' | 'cursor_hesitation' | 'cursor_oscillation' | 'doomscroll';
 
 /** How long an intervention bubble stays up before auto-dismissing. */
 export const INTERVENTION_TTL_MS = 10_000;

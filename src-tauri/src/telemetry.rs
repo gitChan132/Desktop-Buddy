@@ -141,6 +141,53 @@ fn pointer() -> &'static Mutex<PointerTelemetry> {
     POINTER.get_or_init(|| Mutex::new(PointerTelemetry::default()))
 }
 
+/// Rolling window for wheel activity.
+const SCROLL_WINDOW: Duration = Duration::from_secs(90);
+
+/// Only wheel timing is kept: no page content, no position, no target app.
+#[derive(Default)]
+struct ScrollTelemetry {
+    /// One entry per wheel event that moved the page.
+    events: VecDeque<Instant>,
+}
+
+/// Wheel activity seen in the rolling window.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ScrollSnapshot {
+    pub scrolls_in_window: usize,
+}
+
+fn scroll() -> &'static Mutex<ScrollTelemetry> {
+    static SCROLL: OnceLock<Mutex<ScrollTelemetry>> = OnceLock::new();
+    SCROLL.get_or_init(|| Mutex::new(ScrollTelemetry::default()))
+}
+
+fn prune_scrolls(state: &mut ScrollTelemetry, now: Instant) {
+    while state
+        .events
+        .front()
+        .is_some_and(|stamp| now.duration_since(*stamp) > SCROLL_WINDOW)
+    {
+        state.events.pop_front();
+    }
+}
+
+fn note_scroll(now: Instant) {
+    let mut state = scroll().lock().expect("scroll telemetry lock poisoned");
+    state.events.push_back(now);
+    prune_scrolls(&mut state, now);
+}
+
+/// Wheel events in the last [`SCROLL_WINDOW`], used by the doomscroll detector.
+pub fn scroll_snapshot() -> ScrollSnapshot {
+    let now = Instant::now();
+    let mut state = scroll().lock().expect("scroll telemetry lock poisoned");
+    prune_scrolls(&mut state, now);
+    ScrollSnapshot {
+        scrolls_in_window: state.events.len(),
+    }
+}
+
 /// Latest score in `f32` bits, readable without taking a lock.
 fn latest_stress() -> &'static AtomicU32 {
     static STRESS: AtomicU32 = AtomicU32::new(0);
@@ -391,6 +438,11 @@ fn record(app: &AppHandle, event: Event) {
             let mut state = pointer().lock().expect("pointer telemetry lock poisoned");
             note_click(&mut state, now);
         }
+        EventType::Wheel { delta_y, .. } => {
+            if delta_y != 0 {
+                note_scroll(now);
+            }
+        }
         _ => {}
     }
 }
@@ -484,6 +536,16 @@ mod tests {
         queue.push_back(now - Duration::from_secs(5));
         prune(&mut queue, now);
         assert_eq!(queue.len(), 1);
+    }
+
+    #[test]
+    fn scroll_prune_uses_ninety_second_window() {
+        let now = Instant::now();
+        let mut state = ScrollTelemetry::default();
+        state.events.push_back(now - Duration::from_secs(91));
+        state.events.push_back(now - Duration::from_secs(89));
+        prune_scrolls(&mut state, now);
+        assert_eq!(state.events.len(), 1);
     }
 
     #[test]

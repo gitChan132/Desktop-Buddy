@@ -86,7 +86,9 @@ export default function App() {
   const mood: FrogMood = breathingOpen
     ? "croaking"
     : intervention
-      ? "curious"
+      ? intervention.trigger === "doomscroll"
+        ? "grumpy"
+        : "curious"
       : "idle";
 
   const closeBreathing = () => {

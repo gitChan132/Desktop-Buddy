@@ -191,9 +191,28 @@ Rust emits `cursor-pos` and `pond-stress` too; the frontend does **not** consume
 them yet (candidate for stress-reactive moods).
 
 `FrogInterventionPayload` (`src/types.ts`): `id`, `trigger`
-(`frantic_typing | backspace_loop | tab_thrashing | idle_freeze | cursor_hesitation | cursor_oscillation`), `severity`,
+(`frantic_typing | backspace_loop | tab_thrashing | idle_freeze | cursor_hesitation | cursor_oscillation | doomscroll`), `severity`,
 `message`, `suggestedAction` (`belly_breathe | lily_pad_step | pond_stretch`),
-optional `activeApp`. All three actions currently open the same breathing guide.
+optional `activeApp`. All actions currently open the same breathing guide.
+
+### Doomscroll detector
+
+- `telemetry.rs` counts wheel events (`EventType::Wheel`) in a 90-second rolling
+  window; `scroll_snapshot()` exposes the count. No content or coordinates.
+- `window_tracker.rs` flags the foreground window as a feed when it is a TikTok
+  or Instagram app, or a browser tab whose title contains
+  `instagram | youtube | tiktok | shorts | reels`. `feed_seconds` tracks how long
+  that feed has been in front and resets the moment focus lands elsewhere.
+  Scope is deliberately tight — Reddit/X/etc. do **not** count.
+- `ai_engine.rs` fires `doomscroll` when all of: `on_feed`, `feed_seconds >= 240`,
+  `scrolls_90s >= 40`, `keys_30s < 10`. It is checked after the other triggers.
+  The LLM prompt gets a sterner clause for this trigger ("playfully stern and
+  disappointed"); the deterministic fallback is written the same way.
+- Demo/test overrides: `FROG_DOOMSCROLL_SECS`, `FROG_DOOMSCROLL_SCROLLS`
+  (alongside `FROG_EVAL_SECS`).
+- Frontend: `App` maps `trigger === "doomscroll"` to the `grumpy` mood;
+  `FeelingFrog` shows shock frame 1 (wide-eyed glare) with the `.pixel-shake`
+  CSS animation.
 
 ---
 

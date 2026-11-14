@@ -78,6 +78,37 @@
     background: #d4efc9;
     box-shadow: inset 0 0 0 1px rgb(247 255 241 / 0.7);
   }
+
+  /* Cross frog: a short, choppy head-shake every couple of seconds. */
+  .pixel-shake {
+    animation: pixel-shake 2.4s steps(1, end) infinite;
+  }
+
+  @keyframes pixel-shake {
+    0%,
+    30%,
+    100% {
+      transform: translateX(0);
+    }
+    4% {
+      transform: translateX(-3px);
+    }
+    8% {
+      transform: translateX(3px);
+    }
+    12% {
+      transform: translateX(-3px);
+    }
+    16% {
+      transform: translateX(3px);
+    }
+    20% {
+      transform: translateX(-2px);
+    }
+    24% {
+      transform: translateX(2px);
+    }
+  }
 }
 
 :root {
