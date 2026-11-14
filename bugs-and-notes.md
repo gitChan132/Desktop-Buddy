@@ -71,6 +71,13 @@ Last updated: 2026-11-14 · branch `main`
     window to a Space on macOS, breaking full-screen overlays). Without a
     replacement, other windows cover the frog on Windows, so `lib.rs` now calls
     `set_always_on_top(true)` for non-macOS in setup. Do not remove it.
+15. **Every new window must be listed in `capabilities/default.json`.** The pond
+    window was added without updating `"windows"`, so its `outerPosition`,
+    `scaleFactor` and `listen` calls were denied ("event.listen not allowed on
+    window \"pond\""). The catch blocks hid the failure: the pond computed a jump
+    target of `(365,-121)` from a `(0,0)` origin, so the frog overshot the pad
+    and the copy only appeared after the 3-second fallback. Capability windows
+    are now `["main", "panel", "pond"]`.
 
 ---
 
