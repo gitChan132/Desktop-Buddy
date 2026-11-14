@@ -62,6 +62,15 @@ Last updated: 2026-11-14 · branch `main`
     Close stray tabs before reading logs.
 12. **The dev app dies (`0xffffffff`) when launched from a transient tool shell.**
     Start it detached (see §4).
+13. **Windows: every window must declare the same `additionalBrowserArgs`.** When
+    only the main window had the custom args, the new `panel` window made WebView2
+    fail at startup with `HRESULT(0x8007139F)` / "Class not registered" and the app
+    exited with code 101. Adding the identical args to `panel` in
+    `tauri.conf.json` fixes it.
+14. **Windows: `alwaysOnTop` is no longer in `tauri.conf.json`** (tao pins the
+    window to a Space on macOS, breaking full-screen overlays). Without a
+    replacement, other windows cover the frog on Windows, so `lib.rs` now calls
+    `set_always_on_top(true)` for non-macOS in setup. Do not remove it.
 
 ---
 

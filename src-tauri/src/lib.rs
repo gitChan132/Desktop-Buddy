@@ -299,6 +299,11 @@ pub fn run() {
                 window.set_visible_on_all_workspaces(true)?;
                 #[cfg(target_os = "macos")]
                 float_over_fullscreen_spaces(&window)?;
+                // Windows/Linux: the config can no longer carry `alwaysOnTop`
+                // (tao applies it at creation and breaks macOS Spaces), so the
+                // overlay has to be raised here or other windows cover the frog.
+                #[cfg(not(target_os = "macos"))]
+                window.set_always_on_top(true)?;
                 position_bottom_right(&window)?;
             }
             if let Some(panel) = app.get_webview_window("panel") {
