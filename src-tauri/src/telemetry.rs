@@ -347,3 +347,107 @@ pub fn seconds_since_last_input() -> u64 {
     };
     now.duration_since(latest).as_secs()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prune_drops_entries_outside_window() {
+        let now = Instant::now();
+        let mut queue = VecDeque::new();
+        queue.push_back(now - Duration::from_secs(31));
+        queue.push_back(now - Duration::from_secs(5));
+        prune(&mut queue, now);
+        assert_eq!(queue.len(), 1);
+    }
+
+    #[test]
+    fn speed_stats_empty_is_zero() {
+        assert_eq!(speed_stats(&VecDeque::new()), (0.0, 0.0));
+    }
+
+    #[test]
+    fn speed_stats_mean_and_deviation() {
+        let now = Instant::now();
+        let mut speeds = VecDeque::new();
+        speeds.push_back((now, 10.0));
+        speeds.push_back((now, 20.0));
+        let (mean, jitter) = speed_stats(&speeds);
+        assert!((mean - 15.0).abs() < 1e-3);
+        assert!((jitter - 5.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn stress_is_zero_when_idle() {
+        let score = WeightedStress.score(&TypingTelemetry::default(), &PointerTelemetry::default());
+        assert_eq!(score, 0.0);
+    }
+
+    #[test]
+    fn stress_weights_key_pressure() {
+        let now = Instant::now();
+        let mut typing = TypingTelemetry::default();
+        // Half of MAX_KEYS_PER_WINDOW (180) => key_pressure 0.5, weighted 0.35.
+        for _ in 0..90 {
+            typing.keypresses.push_back(now);
+        }
+        let score = WeightedStress.score(&typing, &PointerTelemetry::default());
+        assert!((score - 0.35 * 0.5).abs() < 1e-3);
+    }
+
+    #[test]
+    fn stress_clamps_to_one_when_saturated() {
+        let now = Instant::now();
+        let mut typing = TypingTelemetry::default();
+        for _ in 0..400 {
+            typing.keypresses.push_back(now);
+        }
+        for _ in 0..60 {
+            typing.backspaces.push_back(now);
+        }
+        let mut pointer = PointerTelemetry::default();
+        // Alternating speeds => high mean and high jitter, both saturate.
+        for i in 0..120 {
+            pointer
+                .speeds
+                .push_back((now, if i % 2 == 0 { 6000.0 } else { 0.0 }));
+        }
+        let score = WeightedStress.score(&typing, &pointer);
+        assert_eq!(score, 1.0);
+    }
+
+    #[test]
+    fn backspace_streak_counts_within_timeout() {
+        let mut state = TypingTelemetry::default();
+        let base = Instant::now();
+        for i in 0..5 {
+            note_keypress(&mut state, Key::Backspace, base + Duration::from_millis(i * 100));
+        }
+        assert_eq!(state.backspace_streak, 5);
+        assert_eq!(state.backspaces.len(), 5);
+    }
+
+    #[test]
+    fn backspace_streak_resets_after_gap() {
+        let mut state = TypingTelemetry::default();
+        let base = Instant::now();
+        note_keypress(&mut state, Key::Backspace, base);
+        note_keypress(
+            &mut state,
+            Key::Backspace,
+            base + BACKSPACE_STREAK_TIMEOUT + Duration::from_secs(1),
+        );
+        assert_eq!(state.backspace_streak, 1);
+    }
+
+    #[test]
+    fn normal_key_resets_backspace_streak() {
+        let mut state = TypingTelemetry::default();
+        let base = Instant::now();
+        note_keypress(&mut state, Key::Backspace, base);
+        note_keypress(&mut state, Key::Backspace, base + Duration::from_millis(100));
+        note_keypress(&mut state, Key::KeyA, base + Duration::from_millis(200));
+        assert_eq!(state.backspace_streak, 0);
+    }
+}

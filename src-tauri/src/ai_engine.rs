@@ -10,6 +10,15 @@ use crate::telemetry::{self, TypingSnapshot};
 use crate::window_tracker::{self, WindowSnapshot};
 
 const EVALUATION_INTERVAL: Duration = Duration::from_secs(20);
+
+/// Evaluation cadence; `FROG_EVAL_SECS` overrides it for fast e2e tests.
+fn evaluation_interval() -> Duration {
+    std::env::var("FROG_EVAL_SECS")
+        .ok()
+        .and_then(|secs| secs.parse().ok())
+        .map(Duration::from_secs)
+        .unwrap_or(EVALUATION_INTERVAL)
+}
 /// Don't nudge the user more often than this.
 const INTERVENTION_COOLDOWN: Duration = Duration::from_secs(5 * 60);
 
@@ -104,7 +113,7 @@ fn build_intervention(
     } else if windows.idle_freeze {
         (
             "idle_freeze",
-            "*ribbit* Six minutes, no keys and no mouse, and the editor still has you. Stretch your legs and let the pond settle.".to_string(),
+            "*ribbit* Two and a half minutes, no keys and no mouse, and the editor still has you. Stretch your legs and let the pond settle.".to_string(),
             "pond_stretch",
         )
     } else {
@@ -141,7 +150,7 @@ fn detection_detail(
             "{} window switches in the last 20 seconds",
             windows.switches_in_window
         ),
-        "idle_freeze" => "6 minutes with no keyboard or mouse input".to_string(),
+        "idle_freeze" => "2.5 minutes with no keyboard or mouse input".to_string(),
         other => other.to_string(),
     }
 }
@@ -315,7 +324,7 @@ pub fn start(app: AppHandle) {
         }
 
         loop {
-            std::thread::sleep(EVALUATION_INTERVAL);
+            std::thread::sleep(evaluation_interval());
 
             let typing = telemetry::snapshot();
             let windows = window_tracker::snapshot();
@@ -362,4 +371,149 @@ fn fire_forced(app: &AppHandle, trigger: &str) -> bool {
         fallback,
     ))
     .is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn severity_bands() {
+        assert_eq!(severity_for(0), "low");
+        assert_eq!(severity_for(39), "low");
+        assert_eq!(severity_for(40), "medium");
+        assert_eq!(severity_for(69), "medium");
+        assert_eq!(severity_for(70), "high");
+        assert_eq!(severity_for(100), "high");
+    }
+
+    #[test]
+    fn no_intervention_when_calm() {
+        let windows = WindowSnapshot {
+            stress_score: 0.5,
+            ..Default::default()
+        };
+        assert!(build_intervention(&TypingSnapshot::default(), &windows).is_none());
+    }
+
+    #[test]
+    fn backspace_loop_detected_by_count() {
+        let typing = TypingSnapshot {
+            backspaces_in_window: 24,
+            ..Default::default()
+        };
+        let payload = build_intervention(&typing, &WindowSnapshot::default()).unwrap();
+        assert_eq!(payload.trigger, "backspace_loop");
+        assert_eq!(payload.suggested_action, "belly_breathe");
+    }
+
+    #[test]
+    fn backspace_loop_detected_by_streak() {
+        let typing = TypingSnapshot {
+            backspace_streak: 6,
+            ..Default::default()
+        };
+        let payload = build_intervention(&typing, &WindowSnapshot::default()).unwrap();
+        assert_eq!(payload.trigger, "backspace_loop");
+    }
+
+    #[test]
+    fn frantic_typing_at_threshold() {
+        let typing = TypingSnapshot {
+            keys_in_window: 180,
+            ..Default::default()
+        };
+        let payload = build_intervention(&typing, &WindowSnapshot::default()).unwrap();
+        assert_eq!(payload.trigger, "frantic_typing");
+        assert_eq!(payload.suggested_action, "pond_stretch");
+    }
+
+    #[test]
+    fn tab_thrashing_detected() {
+        let windows = WindowSnapshot {
+            tab_thrashing: true,
+            switches_in_window: 9,
+            ..Default::default()
+        };
+        let payload = build_intervention(&TypingSnapshot::default(), &windows).unwrap();
+        assert_eq!(payload.trigger, "tab_thrashing");
+        assert_eq!(payload.suggested_action, "lily_pad_step");
+    }
+
+    #[test]
+    fn idle_freeze_detected() {
+        let windows = WindowSnapshot {
+            idle_freeze: true,
+            ..Default::default()
+        };
+        let payload = build_intervention(&TypingSnapshot::default(), &windows).unwrap();
+        assert_eq!(payload.trigger, "idle_freeze");
+    }
+
+    #[test]
+    fn backspace_has_priority_over_other_signals() {
+        let typing = TypingSnapshot {
+            backspaces_in_window: 24,
+            keys_in_window: 200,
+            ..Default::default()
+        };
+        let windows = WindowSnapshot {
+            tab_thrashing: true,
+            idle_freeze: true,
+            ..Default::default()
+        };
+        let payload = build_intervention(&typing, &windows).unwrap();
+        assert_eq!(payload.trigger, "backspace_loop");
+    }
+
+    #[test]
+    fn detection_detail_reports_counts() {
+        let typing = TypingSnapshot {
+            backspaces_in_window: 40,
+            ..Default::default()
+        };
+        let detail = detection_detail("backspace_loop", &typing, &WindowSnapshot::default());
+        assert_eq!(detail, "40 backspaces in the last 30 seconds");
+    }
+
+    #[test]
+    fn suggested_actions_map_by_trigger() {
+        assert_eq!(suggested_action_for("backspace_loop"), "belly_breathe");
+        assert_eq!(suggested_action_for("tab_thrashing"), "lily_pad_step");
+        assert_eq!(suggested_action_for("frantic_typing"), "pond_stretch");
+        assert_eq!(suggested_action_for("idle_freeze"), "pond_stretch");
+        assert_eq!(suggested_action_for("unknown"), "pond_stretch");
+    }
+
+    #[test]
+    fn llm_request_carries_persona_observation_and_schema() {
+        let request = build_llm_request("backspace_loop", "Final Essay", "40 backspaces");
+        let system = request["system_instruction"]["parts"][0]["text"]
+            .as_str()
+            .unwrap();
+        assert!(system.contains("Feeling Frog"));
+        let observation = request["contents"][0]["parts"][0]["text"]
+            .as_str()
+            .unwrap();
+        assert!(observation.contains("Final Essay"));
+        assert!(observation.contains("backspace_loop"));
+        assert_eq!(
+            request["generationConfig"]["responseMimeType"],
+            "application/json"
+        );
+        let actions = request["generationConfig"]["responseSchema"]["properties"]
+            ["suggestedAction"]["enum"]
+            .as_array()
+            .unwrap();
+        assert_eq!(actions.len(), 3);
+    }
+
+    #[test]
+    fn ids_are_prefixed_and_increase() {
+        let first = next_id();
+        std::thread::sleep(Duration::from_millis(3));
+        let second = next_id();
+        assert!(first.starts_with("frog-"));
+        assert_ne!(first, second);
+    }
 }
