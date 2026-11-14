@@ -56,7 +56,7 @@ thing; the rest of the window is click-through) that:
 | `src/breathing.ts` | Shared breath phases (3s inhale / 3s hold / 5s exhale) used by both the guide and the sprite |
 | `src/components/SettingsPond.tsx` | Pond-themed settings window (tray → "Pond settings"): status HUD, frog hop-in, lilypad toggles |
 | `src/assets/frog/green_spritesheet.png` | The green sprite sheet (16×16 grid of 32px cells) |
-| `src/assets/frog/lilypad-pond.jpg` | Pixel pond background for the settings window |
+| `src/assets/frog/pond1.png` | Pond background for the settings window |
 | `src/assets/fonts/vt323.woff2` | Bundled retro dialogue font (VT323, OFL) — no network needed at runtime |
 | `src/styles.css` | Base styles + `.pixel-panel` / `.pixel-chip` / `.pixel-button` / `.pixel-bar` / `.pixel-tail` |
 | `src-tauri/src/telemetry.rs` | Emits `cursor-pos`, `pond-stress`, and `pointer-release` (see §5) |
@@ -190,6 +190,8 @@ literal hex values in those classes and match the sprite (`#0b3a1f` ink,
   close); there are no in-window buttons now. The title-bar X is intercepted in
   Rust (`CloseRequested` → `prevent_close`, hide the pond, show the frog), and
   Escape does the same via `hide_pond`.
+- The pond background is a single static image (`pond1.png`) with the frog
+  landing on its central lilypad at `LAND` in `SettingsPond.tsx`.
 - Stats come from the `frog_stats` command, polled every 2 s: anxiety is the pond
   stress score; focus is `1 − (0.6 × switch pressure + 0.4 if on a feed)`; the
   HUD also lists keys, backspaces, switches, hesitation, reversals, scrolls,

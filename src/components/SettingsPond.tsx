@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { motion } from "framer-motion";
 import { useCallback, useEffect, useState } from "react";
-import lilypadPond from "../assets/frog/lilypad-pond.jpg";
+import lilypadPond from "../assets/frog/pond1.png";
 import greenSpritesheet from "../assets/frog/green_spritesheet.png";
 import {
   loadSettings,
@@ -15,8 +15,8 @@ import {
 const PANEL_W = 760;
 const PANEL_H = 540;
 const FROG_SIZE = 190;
-/** Where he lands: top-left of the frog sprite, on a clear lilypad. */
-const LAND = { x: 293, y: 199 };
+/** Where he lands: top-left of the frog sprite, on the pond's lilypad. */
+const LAND = { x: 440, y: 97 };
 
 const SHEET_COLUMNS = 16;
 const IDLE_FRAMES = 4;
