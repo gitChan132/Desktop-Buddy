@@ -1,5 +1,8 @@
 export type BurnoutTrigger = 'frantic_typing' | 'backspace_loop' | 'tab_thrashing' | 'idle_freeze';
 
+/** How long an intervention bubble stays up before auto-dismissing. */
+export const INTERVENTION_TTL_MS = 10_000;
+
 export interface FrogInterventionPayload {
     id: string;
     trigger: BurnoutTrigger;

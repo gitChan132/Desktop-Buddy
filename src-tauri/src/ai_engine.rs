@@ -300,6 +300,7 @@ pub async fn trigger_frog_intervention(
         eprintln!("[ai_engine] could not emit intervention: {error}");
         return None;
     }
+    eprintln!("[ai_engine] emitted trigger={}", payload.trigger);
 
     Some(payload)
 }
@@ -307,28 +308,27 @@ pub async fn trigger_frog_intervention(
 /// Starts the periodic evaluation loop that emits `trigger-intervention` events.
 pub fn start(app: AppHandle) {
     std::thread::spawn(move || {
-        // Test hook (disabled): FROG_FORCE_TRIGGER=backspace_loop fired every tick.
-        // let forced = std::env::var("FROG_FORCE_TRIGGER").ok();
-        // if let Some(trigger) = forced.clone() {
-        //     std::thread::sleep(Duration::from_secs(12));
-        //     fire_forced(&app, &trigger);
-        // }
+        let forced = std::env::var("FROG_FORCE_TRIGGER").ok();
+        if let Some(trigger) = forced.clone() {
+            std::thread::sleep(Duration::from_secs(2));
+            fire_forced(&app, &trigger);
+        }
 
         loop {
             std::thread::sleep(EVALUATION_INTERVAL);
 
             let typing = telemetry::snapshot();
             let windows = window_tracker::snapshot();
-            // eprintln!(
-            //     "[ai_engine] tick keys={} backspaces={} streak={} switches={} thrash={} idle={} stress={:.2}",
-            //     typing.keys_in_window,
-            //     typing.backspaces_in_window,
-            //     typing.backspace_streak,
-            //     windows.switches_in_window,
-            //     windows.tab_thrashing,
-            //     windows.idle_freeze,
-            //     windows.stress_score
-            // );
+            eprintln!(
+                "[ai_engine] tick keys={} backspaces={} streak={} switches={} thrash={} idle={} stress={:.2}",
+                typing.keys_in_window,
+                typing.backspaces_in_window,
+                typing.backspace_streak,
+                windows.switches_in_window,
+                windows.tab_thrashing,
+                windows.idle_freeze,
+                windows.stress_score
+            );
 
             let Some(candidate) = build_intervention(&typing, &windows) else {
                 continue;
@@ -352,14 +352,14 @@ pub fn start(app: AppHandle) {
     });
 }
 
-// Test hook (disabled): forced intervention helper.
-// fn fire_forced(app: &AppHandle, trigger: &str) -> bool {
-//     let fallback = format!("*ribbit* Dev trigger: {trigger}. Take one slow breath with me.");
-//     tauri::async_runtime::block_on(trigger_frog_intervention(
-//         app.clone(),
-//         trigger.to_string(),
-//         "Final Essay - Google Docs".to_string(),
-//         fallback,
-//     ))
-//     .is_some()
-// }
+fn fire_forced(app: &AppHandle, trigger: &str) -> bool {
+    let fallback = format!("*ribbit* Dev trigger: {trigger}. Take one slow breath with me.");
+    tauri::async_runtime::block_on(trigger_frog_intervention(
+        app.clone(),
+        trigger.to_string(),
+        "Final Essay - Google Docs".to_string(),
+        "40 backspaces in the last 30 seconds".to_string(),
+        fallback,
+    ))
+    .is_some()
+}

@@ -3,7 +3,7 @@ import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import { BreatheAlong } from "./components/BreatheAlong";
 import { FeelingFrog, type FrogMood } from "./components/FeelingFrog";
-import type { FrogInterventionPayload } from "./types";
+import { INTERVENTION_TTL_MS, type FrogInterventionPayload } from "./types";
 
 // Region (logical px, anchored bottom-center) where the frog is clickable.
 // Everything else in the transparent window stays click-through.
@@ -73,6 +73,13 @@ export default function App() {
       void unlisten.then((off) => off());
     };
   }, []);
+
+  // Auto-dismiss the bubble so it never lingers on screen.
+  useEffect(() => {
+    if (!intervention) return;
+    const timer = setTimeout(() => setIntervention(null), INTERVENTION_TTL_MS);
+    return () => clearTimeout(timer);
+  }, [intervention]);
 
   const mood: FrogMood = breathingOpen
     ? "croaking"

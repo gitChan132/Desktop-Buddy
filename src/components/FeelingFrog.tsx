@@ -8,7 +8,7 @@ import {
 } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import greenSpritesheet from "../assets/frog/green_spritesheet.png";
-import type { FrogInterventionPayload } from "../types";
+import { INTERVENTION_TTL_MS, type FrogInterventionPayload } from "../types";
 
 /**
  * Where a hand would grip the frog inside one 32px cell: the centre of the
@@ -487,12 +487,28 @@ export function FeelingFrog({
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 6, scale: 0.94 }}
               transition={{ type: "spring", stiffness: 320, damping: 24 }}
-              className="pointer-events-auto w-[260px] rounded-2xl border border-emerald-900/10 bg-emerald-50/95 px-3.5 py-2.5 text-[12px] leading-snug text-emerald-950 shadow-lg shadow-emerald-950/10 backdrop-blur"
+              className="pointer-events-auto relative w-[260px] overflow-hidden rounded-2xl border border-emerald-900/10 bg-emerald-50/95 px-3.5 pt-2.5 pb-3.5 text-[12px] leading-snug text-emerald-950 shadow-lg shadow-emerald-950/10 backdrop-blur"
             >
               <p className="font-semibold">{intervention.message}</p>
               <p className="mt-1 text-[11px] text-emerald-700">
                 {ACTION_LABEL[intervention.suggestedAction]}
               </p>
+              {/* Timer bar: drains linearly until the bubble auto-dismisses. */}
+              <span
+                aria-hidden
+                className="absolute inset-x-0 bottom-0 h-[3px] bg-emerald-900/10"
+              >
+                <motion.span
+                  key={`${intervention.id}-timer`}
+                  className="block h-full origin-left bg-emerald-500/70"
+                  initial={{ scaleX: 1 }}
+                  animate={{ scaleX: 0 }}
+                  transition={{
+                    duration: INTERVENTION_TTL_MS / 1000,
+                    ease: "linear",
+                  }}
+                />
+              </span>
             </motion.div>
           )}
         </AnimatePresence>
