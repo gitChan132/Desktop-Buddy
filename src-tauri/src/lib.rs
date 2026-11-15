@@ -468,6 +468,11 @@ struct PendingJump {
 static POND_FROG_ON_PAD: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+/// The lilypad's position relative to the pond window's top-left, in logical
+/// px. Stored when the jump starts so the drop lands correctly even if the pond
+/// window is moved while it is open.
+static POND_PAD_OFFSET: Mutex<Option<(f64, f64)>> = Mutex::new(None);
+
 /// Payload of `pond-hidden`: `drop` tells the overlay to fall from the pad
 /// instead of simply reappearing at its old desktop spot.
 #[derive(Clone, serde::Serialize)]
@@ -482,6 +487,19 @@ struct PondHidden {
 #[tauri::command]
 fn start_pond_jump(app: AppHandle, request: JumpRequest) {
     POND_FROG_ON_PAD.store(false, std::sync::atomic::Ordering::Release);
+    // Remember where the pad sits inside the pond (logical px). The pond can be
+    // dragged while open, so the drop on close recomputes from its new origin.
+    let pad_offset = app.get_webview_window(POND_LABEL).and_then(|pond| {
+        let origin = pond.outer_position().ok()?;
+        let scale = pond.scale_factor().ok().unwrap_or(1.0);
+        Some((
+            (request.target_x - origin.x as f64) / scale,
+            (request.target_y - origin.y as f64) / scale,
+        ))
+    });
+    if let Ok(mut offset) = POND_PAD_OFFSET.lock() {
+        *offset = pad_offset;
+    }
     if let Ok(mut pending) = POND_JUMP.lock() {
         *pending = Some(request.clone());
     }
@@ -529,22 +547,32 @@ fn hide_frog_overlay(app: AppHandle) {
 }
 
 /// Closes the pond and brings the frog back. When he had landed on the pad, put
-/// the overlay back on the landing spot first: the frontend then drops him from
-/// the lilypad with the same physics as a mouse release.
+/// the overlay back on the lilypad first: the frontend then drops him from there
+/// with the same physics as a mouse release. The pad position is recomputed from
+/// the pond's *current* window position, so moving the pond window before
+/// closing still drops him from the pad's new screen spot.
 fn close_pond(app: &AppHandle) {
-    if let Some(pond) = app.get_webview_window(POND_LABEL) {
+    let pond = app.get_webview_window(POND_LABEL);
+    let landing = if POND_FROG_ON_PAD.swap(false, std::sync::atomic::Ordering::AcqRel) {
+        pond.as_ref().and_then(|pond| {
+            let origin = pond.outer_position().ok()?;
+            let scale = pond.scale_factor().ok().unwrap_or(1.0);
+            let (pad_x, pad_y) = POND_PAD_OFFSET.lock().ok().and_then(|offset| *offset)?;
+            Some(PhysicalPosition::new(
+                (origin.x as f64 + pad_x * scale).round() as i32,
+                (origin.y as f64 + pad_y * scale).round() as i32,
+            ))
+        })
+    } else {
+        None
+    };
+    if let Some(pond) = pond {
         let _ = pond.hide();
     }
     let mut drop = false;
-    if POND_FROG_ON_PAD.swap(false, std::sync::atomic::Ordering::AcqRel) {
-        let landing = POND_JUMP.lock().ok().and_then(|pending| pending.clone());
-        if let (Some(main), Some(request)) = (app.get_webview_window("main"), landing) {
-            let _ = main.set_position(PhysicalPosition::new(
-                request.target_x.round() as i32,
-                request.target_y.round() as i32,
-            ));
-            drop = true;
-        }
+    if let (Some(main), Some(spot)) = (app.get_webview_window("main"), landing) {
+        let _ = main.set_position(spot);
+        drop = true;
     }
     set_main_visible(app, true);
     let _ = app.emit("pond-hidden", PondHidden { drop });

@@ -231,10 +231,13 @@ may still be loading when the request fires; `open_pond` also emits
   mid-flight entrance and puts him back, but must not disable later jumps: the
   frog tracks jumps with a run counter, and it polls `pending_pond_jump` every
   200 ms as a fallback in case the `pond-jump` event was missed. When the pond
-  closes after a landing, Rust parks the overlay back on the landing spot and
-  emits `pond-hidden` with `{ drop: true }`; the overlay then runs `throwFrog([])`,
-  the same physics as a mouse release, so he falls from the lilypad and settles
-  on the desktop. Closing mid-flight sends `{ drop: false }` (just abort).
+  closes after a landing, Rust parks the overlay back on the lilypad and emits
+  `pond-hidden` with `{ drop: true }`; the overlay then runs `throwFrog([])`, the
+  same physics as a mouse release, so he falls from the lilypad and settles on
+  the desktop. The pad spot is recomputed from the pond's current window position
+  (its offset inside the pond is stored at jump time), so dragging the pond while
+  it is open still drops him from the pad's new screen location. Closing
+  mid-flight sends `{ drop: false }` (just abort).
 - `FROG_OPEN_PANEL=1` opens the popover at launch and `FROG_OPEN_POND=1` opens
   the pond directly, both for demos/testing.
 
