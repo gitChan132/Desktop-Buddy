@@ -47,6 +47,7 @@
         "width": 760,
         "height": 540,
         "resizable": false,
+        "maximizable": false,
         "decorations": true,
         "transparent": false,
         "shadow": true,
