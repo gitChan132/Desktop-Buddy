@@ -1,4 +1,4 @@
-# The Feeling Frog 🐸 — Scope
+# For Frog's Sake 🐸 — Scope
 
 A cozy, empathetic desktop companion that notices invisible cognitive friction
 (executive dysfunction, ADHD paralysis, burnout) and offers a gentle micro-intervention

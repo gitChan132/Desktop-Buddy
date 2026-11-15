@@ -14,4 +14,4 @@ sides together, plus a `set_*` command, and every window picks it up over `frog-
 - Frontend: `npx tsc --noEmit`, `npm run build`.
 
 Keep `cargo check` clean in `src-tauri/` (one known harmless warning: `block v0.1.6`).
-Kill stray dev processes when done: `pkill -f "tauri dev"; pkill -f desktop-buddy; pkill -f vite`.
+Kill stray dev processes when done: `pkill -f "tauri dev"; pkill -f for-frogs-sake; pkill -f vite`.

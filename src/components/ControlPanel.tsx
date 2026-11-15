@@ -113,7 +113,7 @@ export function ControlPanel() {
       <div className="pixel-panel relative flex w-full flex-col px-3 py-2.5 text-emerald-950">
         <div className="-mx-3 -mt-2.5 mb-2 flex items-center justify-between bg-[#0b3a1f] px-2 py-1">
           <span className="text-[14px] uppercase leading-none tracking-[0.12em] text-emerald-100">
-            Feeling Frog
+            For Frog's Sake
           </span>
           <button
             type="button"

@@ -149,7 +149,7 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
             )?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "testing", "Test triggers…", true, None::<&str>)?,
-            &MenuItem::with_id(app, "quit", "Quit Feeling Frog", true, None::<&str>)?,
+            &MenuItem::with_id(app, "quit", "Quit For Frog's Sake", true, None::<&str>)?,
         ],
     )?;
 
@@ -159,7 +159,7 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)
-        .tooltip("Feeling Frog")
+        .tooltip("For Frog's Sake")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {

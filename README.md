@@ -1,4 +1,4 @@
-# The Feeling Frog 🐸
+# For Frog's Sake 🐸
 
 A cozy desktop companion that watches for invisible signs of burnout — backspace spirals,
 frantic typing, tab-thrashing, decision paralysis, idle freezes — and hops in with one warm,

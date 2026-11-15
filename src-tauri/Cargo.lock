@@ -914,25 +914,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "desktop-buddy"
-version = "0.1.0"
-dependencies = [
- "active-win-pos-rs",
- "dotenvy",
- "objc2",
- "objc2-app-kit",
- "objc2-core-foundation",
- "rdev",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "windows 0.62.2",
-]
-
-[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1234,6 +1215,25 @@ name = "foldhash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
+
+[[package]]
+name = "for-frogs-sake"
+version = "0.1.0"
+dependencies = [
+ "active-win-pos-rs",
+ "dotenvy",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
+ "rdev",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "windows 0.62.2",
+]
 
 [[package]]
 name = "foreign-types"

@@ -5,7 +5,7 @@ try them. If something fails, note what you did + what happened.
 
 ## 0. Before you start
 
-- [ ] `npm run tauri dev` starts cleanly (port 1420 free, no stray `desktop-buddy`).
+- [ ] `npm run tauri dev` starts cleanly (port 1420 free, no stray `for-frogs-sake`).
 - [ ] On macOS, the app/terminal has **Accessibility** permission (needed for triggers + selection).
 - [ ] `GEMINI_API_KEY` is in the environment or `.env.local` (otherwise you get fallback copy).
 - [ ] Rust changes need a dev restart; frontend changes hot-reload.

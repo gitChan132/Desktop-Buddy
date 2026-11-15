@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "desktop-buddy",
+  "productName": "For Frog's Sake",
   "version": "0.1.0",
-  "identifier": "com.desktopbuddy.app",
+  "identifier": "com.forfrogsake.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -15,7 +15,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Feeling Frog",
+        "title": "For Frog's Sake",
         "width": 340,
         "height": 420,
         "resizable": false,
@@ -28,7 +28,7 @@
       },
       {
         "label": "panel",
-        "title": "Feeling Frog Controls",
+        "title": "For Frog's Sake Controls",
         "width": 272,
         "height": 360,
         "resizable": false,
