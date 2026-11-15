@@ -24,6 +24,20 @@ const ACTIVITIES: [&str; 4] = [
 /// Mode ids, in bit order. Keep in sync with `PondMode` in settings.ts.
 const MODES: [&str; 3] = ["focus", "chill", "fun"];
 
+/// Frog palette ids, in cycle order. Keep in sync with `FrogColor` in
+/// sprites.ts.
+const FROG_COLORS: [&str; 4] = ["green", "blue", "pink", "amber"];
+
+/// Which spritesheet the frog wears.
+#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FrogColor {
+    Green,
+    Blue,
+    Pink,
+    Amber,
+}
+
 /// Mood of the pond. Focus nudges sooner, Chill leaves you alone, Fun keeps it
 /// light and quick.
 #[derive(Clone, Copy, PartialEq, Eq, Serialize)]
@@ -92,6 +106,7 @@ pub struct Settings {
     pub sound_enabled: bool,
     pub volume: f32,
     pub mode: Mode,
+    pub frog_color: FrogColor,
     pub selection_summaries: bool,
     pub triggers: TriggerSettings,
     pub activities: ActivitySettings,
@@ -102,6 +117,8 @@ static NUDGES_PAUSED: AtomicBool = AtomicBool::new(false);
 static SELECTION_SUMMARIES: AtomicBool = AtomicBool::new(true);
 /// Index into `MODES`; 0 is Focus.
 static MODE: AtomicU8 = AtomicU8::new(0);
+/// Index into `FROG_COLORS`; 0 is Green.
+static FROG_COLOR: AtomicU8 = AtomicU8::new(0);
 static SOUND_ENABLED: AtomicBool = AtomicBool::new(true);
 /// Croak loudness in `0.0..=1.0`, stored as raw f32 bits to stay lock-free.
 static VOLUME: AtomicU32 = AtomicU32::new(0.5f32.to_bits());
@@ -112,6 +129,7 @@ pub fn settings() -> Settings {
         sound_enabled: SOUND_ENABLED.load(Ordering::Relaxed),
         volume: f32::from_bits(VOLUME.load(Ordering::Relaxed)),
         mode: mode(),
+        frog_color: frog_color(),
         selection_summaries: selection_summaries(),
         triggers: TriggerSettings {
             frantic_typing: trigger_enabled("frantic_typing"),
@@ -151,6 +169,22 @@ pub fn mode() -> Mode {
 pub fn set_mode(name: &str) {
     if let Some(index) = index_of(&MODES, name) {
         MODE.store(index, Ordering::Relaxed);
+    }
+}
+
+pub fn frog_color() -> FrogColor {
+    match FROG_COLOR.load(Ordering::Relaxed) {
+        1 => FrogColor::Blue,
+        2 => FrogColor::Pink,
+        3 => FrogColor::Amber,
+        _ => FrogColor::Green,
+    }
+}
+
+/// Unknown names are ignored so a stale pond can't wedge the palette.
+pub fn set_frog_color(name: &str) {
+    if let Some(index) = index_of(&FROG_COLORS, name) {
+        FROG_COLOR.store(index, Ordering::Relaxed);
     }
 }
 

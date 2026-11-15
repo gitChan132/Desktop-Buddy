@@ -4,12 +4,12 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { motion } from "framer-motion";
 import { useCallback, useEffect, useRef, useState } from "react";
 import pondArt from "../assets/frog/pond1.png";
-import greenSpritesheet from "../assets/frog/green_spritesheet.png";
 import { applySoundSettings, playCroak } from "../croak";
 import {
   DEFAULT_SETTINGS,
   loadSettings,
   saveActivityEnabled,
+  saveFrogColor,
   saveMode,
   saveNudgesPaused,
   saveSelectionSummaries,
@@ -22,6 +22,12 @@ import {
   type PondMode,
   type TriggerId,
 } from "../settings";
+import {
+  FROG_COLOR_LABELS,
+  SPRITESHEETS,
+  shiftFrogColor,
+  type FrogColor,
+} from "../sprites";
 
 /** Panel window is 760x540 CSS px (see tauri.conf.json). */
 const FROG_SIZE = 190;
@@ -139,10 +145,12 @@ function PondFrog({
   breatheFrame,
   pose,
   jumping,
+  color,
 }: {
   breatheFrame: number | null;
   pose: { column: number; row: number } | null;
   jumping: boolean;
+  color: FrogColor;
 }) {
   const [idleFrame, setIdleFrame] = useState(0);
   const [jumpFrame, setJumpFrame] = useState(0);
@@ -183,7 +191,7 @@ function PondFrog({
         display: "block",
         width: FROG_SIZE,
         height: FROG_SIZE,
-        backgroundImage: `url(${greenSpritesheet})`,
+        backgroundImage: `url(${SPRITESHEETS[color]})`,
         backgroundSize: `${SHEET_COLUMNS * FROG_SIZE}px ${SHEET_COLUMNS * FROG_SIZE}px`,
         backgroundPosition: `${-column * FROG_SIZE}px ${-row * FROG_SIZE}px`,
         backgroundRepeat: "no-repeat",
@@ -300,6 +308,26 @@ function Toggle({
       >
         <span className="h-[6px] w-[8px] bg-[#04170f]" />
       </span>
+    </button>
+  );
+}
+
+/** Chunky pixel arrow that steps the frog through the palette. */
+function ColorArrow({
+  direction,
+  onClick,
+}: {
+  direction: "left" | "right";
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`${direction === "left" ? "Previous" : "Next"} frog colour`}
+      className="pointer-events-auto flex h-7 w-7 items-center justify-center border-2 border-[#04170f] bg-emerald-500/80 text-[14px] leading-none text-emerald-950 shadow-[2px_2px_0_rgba(4,23,15,0.55)] hover:bg-emerald-300 active:translate-y-px"
+    >
+      {direction === "left" ? "◀" : "▶"}
     </button>
   );
 }
@@ -552,6 +580,12 @@ export function SettingsPond() {
   const pickMode = (mode: PondMode) => {
     setSettings((previous) => ({ ...previous, mode }));
     void saveMode(mode).catch(() => {});
+  };
+
+  const shiftColor = (direction: 1 | -1) => {
+    const frogColor = shiftFrogColor(settings.frogColor, direction);
+    setSettings((previous) => ({ ...previous, frogColor }));
+    void saveFrogColor(frogColor).catch(() => {});
   };
 
   const changeVolume = (volume: number) => {
@@ -921,7 +955,21 @@ export function SettingsPond() {
           breatheFrame={breatheFrame}
           pose={turnRow === null ? null : { column: 0, row: turnRow }}
           jumping={false}
+          color={settings.frogColor}
         />
+        {visible && (
+          <>
+            <div className="absolute left-[-34px] top-[104px]">
+              <ColorArrow direction="left" onClick={() => shiftColor(-1)} />
+            </div>
+            <div className="absolute right-[-34px] top-[104px]">
+              <ColorArrow direction="right" onClick={() => shiftColor(1)} />
+            </div>
+            <span className="absolute inset-x-0 top-[196px] text-center text-[11px] uppercase leading-none tracking-[0.12em] text-emerald-100/80 drop-shadow-[1px_1px_0_rgba(4,23,15,0.8)]">
+              {FROG_COLOR_LABELS[settings.frogColor]}
+            </span>
+          </>
+        )}
       </motion.div>
 
       {/* Pond label */}

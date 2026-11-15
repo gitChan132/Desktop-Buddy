@@ -8,8 +8,9 @@ import {
   useAnimationControls,
 } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
-import greenSpritesheet from "../assets/frog/green_spritesheet.png";
 import { BREATH_PHASES, type BreathPhase } from "../breathing";
+import { loadSettings, watchSettings } from "../settings";
+import { SPRITESHEETS, type FrogColor } from "../sprites";
 import {
   INTERVENTION_TTL_MS,
   type FrogInterventionPayload,
@@ -147,6 +148,8 @@ export function FeelingFrog({
   // True while he is sailing through the air after being thrown.
   const [flying, setFlying] = useState(false);
   const [flightPose, setFlightPose] = useState(0);
+  // Palette chosen in the pond; follows him wherever the window goes.
+  const [frogColor, setFrogColor] = useState<FrogColor>("green");
   const [tilt, setTilt] = useState(0);
 
   // Animation frame id of the throw flight loop.
@@ -303,6 +306,23 @@ export function FeelingFrog({
     );
     return () => clearTimeout(id);
   }, [flying, flightPose]);
+
+  // Palette: pick up the current colour and repaint whenever the pond changes it.
+  useEffect(() => {
+    let live = true;
+    void loadSettings()
+      .then((next) => {
+        if (live) setFrogColor(next.frogColor);
+      })
+      .catch(() => {
+        // Backend unavailable (browser preview): stay green.
+      });
+    const unlisten = watchSettings((next) => setFrogColor(next.frogColor));
+    return () => {
+      live = false;
+      void unlisten.then((off) => off());
+    };
+  }, []);
 
   // Cheeks follow the guide: fill through the inhale, hold full, release on
   // the exhale, using the croak row's throat-puff frames.
@@ -733,7 +753,7 @@ export function FeelingFrog({
           aria-hidden
           className={grumpy ? "absolute inset-0 pixel-shake" : "absolute inset-0"}
           style={{
-            backgroundImage: `url(${greenSpritesheet})`,
+            backgroundImage: `url(${SPRITESHEETS[frogColor]})`,
             backgroundSize: `${SHEET_COLUMNS * RENDER_SIZE}px ${SHEET_COLUMNS * RENDER_SIZE}px`,
             backgroundPosition: `${-sheetColumn * RENDER_SIZE}px ${-sheetRow * RENDER_SIZE}px`,
             backgroundRepeat: "no-repeat",

@@ -300,6 +300,12 @@ fn set_mode(app: AppHandle, mode: String) {
 }
 
 #[tauri::command]
+fn set_frog_color(app: AppHandle, color: String) {
+    settings::set_frog_color(&color);
+    broadcast_settings(&app);
+}
+
+#[tauri::command]
 fn set_selection_summaries(app: AppHandle, enabled: bool) {
     settings::set_selection_summaries(enabled);
     broadcast_settings(&app);
@@ -660,6 +666,7 @@ pub fn run() {
             set_sound_enabled,
             set_sound_volume,
             set_mode,
+            set_frog_color,
             set_selection_summaries,
             set_trigger_enabled,
             set_activity_enabled,

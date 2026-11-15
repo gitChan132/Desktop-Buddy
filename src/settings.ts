@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { FrogColor } from "./sprites";
 
 /** Mirror of `Settings` in `src-tauri/src/settings.rs`. */
 export type TriggerId =
@@ -24,6 +25,7 @@ export type FrogSettings = {
   soundEnabled: boolean;
   volume: number;
   mode: PondMode;
+  frogColor: FrogColor;
   selectionSummaries: boolean;
   triggers: {
     franticTyping: boolean;
@@ -49,6 +51,7 @@ export const DEFAULT_SETTINGS: FrogSettings = {
   soundEnabled: true,
   volume: 0.5,
   mode: "focus",
+  frogColor: "green",
   selectionSummaries: true,
   triggers: {
     franticTyping: true,
@@ -79,6 +82,9 @@ export const saveVolume = (volume: number) =>
   invoke("set_sound_volume", { volume });
 
 export const saveMode = (mode: PondMode) => invoke("set_mode", { mode });
+
+export const saveFrogColor = (color: FrogColor) =>
+  invoke("set_frog_color", { color });
 
 export const saveSelectionSummaries = (enabled: boolean) =>
   invoke("set_selection_summaries", { enabled });
