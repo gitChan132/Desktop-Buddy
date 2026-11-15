@@ -13,6 +13,48 @@ use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow,
 };
 
+/// Moves the real pointer, so the frog can carry the stolen cursor with him.
+/// Takes physical pixels; macOS's warp API wants logical points.
+#[cfg(target_os = "macos")]
+fn warp_cursor_position(x: f64, y: f64, scale: f64) {
+    #[repr(C)]
+    struct CGPoint {
+        x: f64,
+        y: f64,
+    }
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    unsafe extern "C" {
+        fn CGWarpMouseCursorPosition(point: CGPoint) -> i32;
+        fn CGAssociateMouseAndMouseCursorPosition(connected: i32) -> i32;
+    }
+
+    let scale = scale.max(f64::EPSILON);
+    unsafe {
+        CGWarpMouseCursorPosition(CGPoint {
+            x: x / scale,
+            y: y / scale,
+        });
+        // Warping disassociates the pointer for a moment; keep it responsive.
+        CGAssociateMouseAndMouseCursorPosition(1);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn warp_cursor_position(x: f64, y: f64, _scale: f64) {
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn SetCursorPos(x: i32, y: i32) -> i32;
+    }
+
+    unsafe {
+        SetCursorPos(x.round() as i32, y.round() as i32);
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn warp_cursor_position(_x: f64, _y: f64, _scale: f64) {}
+
 /// Gap between the frog and the screen edges, in physical pixels.
 const SCREEN_MARGIN: i32 = 12;
 /// Gap between the tray icon and the control panel, in physical pixels.
@@ -297,6 +339,11 @@ fn set_sound_volume(app: AppHandle, volume: f32) {
 fn set_mode(app: AppHandle, mode: String) {
     settings::set_mode(&mode);
     broadcast_settings(&app);
+}
+
+#[tauri::command]
+fn warp_cursor(x: f64, y: f64, scale: f64) {
+    warp_cursor_position(x, y, scale);
 }
 
 #[tauri::command]
@@ -667,6 +714,7 @@ pub fn run() {
             set_sound_volume,
             set_mode,
             set_frog_color,
+            warp_cursor,
             set_selection_summaries,
             set_trigger_enabled,
             set_activity_enabled,

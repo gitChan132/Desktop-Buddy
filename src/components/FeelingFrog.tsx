@@ -1,15 +1,22 @@
 import { PhysicalPosition } from "@tauri-apps/api/dpi";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
+import {
+  currentMonitor,
+  cursorPosition,
+  getCurrentWindow,
+  monitorFromPoint,
+} from "@tauri-apps/api/window";
 import {
   AnimatePresence,
   motion,
   useAnimationControls,
 } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
+import tongueSpritesheet from "../assets/frog/tongue_spritesheet.png";
 import { BREATH_PHASES, type BreathPhase } from "../breathing";
-import { loadSettings, watchSettings } from "../settings";
+import { playCroak } from "../croak";
+import { loadSettings, watchSettings, type PondMode } from "../settings";
 import { SPRITESHEETS, type FrogColor } from "../sprites";
 import {
   INTERVENTION_TTL_MS,
@@ -81,6 +88,8 @@ interface FeelingFrogProps {
   onCarry: (carrying: boolean) => void;
   /** Current breath phase of an open guide, or null when it is closed. */
   breathPhase: BreathPhase | null;
+  /** False while a panel or guide is open, so free roam doesn't drag it around. */
+  roamEnabled: boolean;
 }
 
 const ACTION_LABEL: Record<FrogInterventionPayload["suggestedAction"], string> =
@@ -98,6 +107,21 @@ const ACTION_LABEL: Record<FrogInterventionPayload["suggestedAction"], string> =
 // it needs, played left to right.
 const SHEET_COLUMNS = 16;
 const RENDER_SIZE = 192;
+
+// The tongue strip holds 13 frames, each 25 CSS px longer than the last.
+const TONGUE_CELL_W = 304;
+const TONGUE_H = 12;
+const TONGUE_FRAMES = 13;
+const TONGUE_FRAME_PX = 25;
+
+/** How long he may keep the cursor before letting go. */
+const CURSOR_STEAL_MS = 5000;
+
+/** The frog's mouth in the bottom-centred, 192px sprite, in window CSS px. */
+const mouthPoint = (width: number, height: number) => ({
+  x: (width - RENDER_SIZE) / 2 + RENDER_SIZE * 0.5,
+  y: height - 12 - RENDER_SIZE + RENDER_SIZE * (23 / 32),
+});
 
 type AnimationName = "idle" | "croak" | "jump" | "hop" | "shock";
 
@@ -135,6 +159,7 @@ export function FeelingFrog({
   onGrounding,
   onCarry,
   breathPhase,
+  roamEnabled,
 }: FeelingFrogProps) {
   const hop = useAnimationControls();
   const lastId = useRef<string | null>(null);
@@ -150,6 +175,22 @@ export function FeelingFrog({
   const [flightPose, setFlightPose] = useState(0);
   // Palette chosen in the pond; follows him wherever the window goes.
   const [frogColor, setFrogColor] = useState<FrogColor>("green");
+  // Fun mode lets him roam the desktop instead of sitting in the corner.
+  const [mode, setMode] = useState<PondMode>("focus");
+  // A tongue shot in flight, in CSS px relative to the window.
+  const [tongue, setTongue] = useState<{
+    id: number;
+    origin: { x: number; y: number };
+    target: { x: number; y: number };
+    frame: number;
+    maxFrame: number;
+  } | null>(null);
+  const tongueId = useRef(0);
+  const tongueAnimation = useRef<number | null>(null);
+  // True while a sprite-animated hop is travelling across the desktop.
+  const [roamingHop, setRoamingHop] = useState(false);
+  // Once yoinked, he keeps the cursor and carries it around.
+  const [stolen, setStolen] = useState(false);
   const [tilt, setTilt] = useState(0);
 
   // Animation frame id of the throw flight loop.
@@ -307,17 +348,22 @@ export function FeelingFrog({
     return () => clearTimeout(id);
   }, [flying, flightPose]);
 
-  // Palette: pick up the current colour and repaint whenever the pond changes it.
+  // Palette and mode: pick up the current values and follow live changes.
   useEffect(() => {
     let live = true;
     void loadSettings()
       .then((next) => {
-        if (live) setFrogColor(next.frogColor);
+        if (!live) return;
+        setFrogColor(next.frogColor);
+        setMode(next.mode);
       })
       .catch(() => {
-        // Backend unavailable (browser preview): stay green.
+        // Backend unavailable (browser preview): stay green and focused.
       });
-    const unlisten = watchSettings((next) => setFrogColor(next.frogColor));
+    const unlisten = watchSettings((next) => {
+      setFrogColor(next.frogColor);
+      setMode(next.mode);
+    });
     return () => {
       live = false;
       void unlisten.then((off) => off());
@@ -452,7 +498,7 @@ export function FeelingFrog({
   );
 
   const handlePointerDown = async (event: React.PointerEvent<HTMLButtonElement>) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || stolen) return;
     // Capture the element now: `currentTarget` is cleared once the handler
     // awaits, and the pointer never gets captured if this happens later.
     const button = event.currentTarget;
@@ -497,6 +543,11 @@ export function FeelingFrog({
     wasDragged.current = false;
     finishDrag();
     if (dragged) return; // A drag must not trigger the croak-along.
+    // Clicking while he has the cursor is how you pry it back out of his mouth.
+    if (stolen) {
+      setStolen(false);
+      return;
+    }
     onGrounding();
   };
 
@@ -643,12 +694,312 @@ export function FeelingFrog({
     };
   }, []);
 
+  // Fun mode: roam the desktop, hop near the cursor and flick his tongue at it.
+  useEffect(() => {
+    if (
+      mode !== "fun" ||
+      !roamEnabled ||
+      held ||
+      flying ||
+      entrance ||
+      intervention
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    let timer: number | undefined;
+
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve) => setTimeout(resolve, ms));
+    const clamp = (value: number, min: number, max: number) =>
+      Math.min(Math.max(value, min), max);
+
+    // Leap to the new spot with the hop row of the spritesheet, arcing the
+    // window so the jump reads on screen instead of teleporting.
+    const hopTo = async (x: number, y: number) => {
+      const win = getCurrentWindow();
+      const start = await win.outerPosition();
+      setRoamingHop(true);
+      await new Promise<void>((resolve) => {
+        const started = performance.now();
+        const duration = 420;
+        const lift = 90;
+        const step = (now: number) => {
+          if (cancelled) {
+            resolve();
+            return;
+          }
+          const t = Math.min(1, (now - started) / duration);
+          const ease = t * t * (3 - 2 * t);
+          void win.setPosition(
+            new PhysicalPosition(
+              Math.round(start.x + (x - start.x) * ease),
+              Math.round(start.y + (y - start.y) * ease - Math.sin(Math.PI * t) * lift),
+            ),
+          );
+          if (t < 1) requestAnimationFrame(step);
+          else resolve();
+        };
+        requestAnimationFrame(step);
+      });
+      if (!cancelled) setRoamingHop(false);
+    };
+
+    // The tongue only reaches things inside the transparent window, so he
+    // hops close enough for the cursor to be in reach first.
+    const shoot = async () => {
+      if (stolen) return;
+      const win = getCurrentWindow();
+      const [cursor, outer, inner, scale] = await Promise.all([
+        cursorPosition(),
+        win.outerPosition(),
+        win.innerSize(),
+        win.scaleFactor(),
+      ]);
+      const width = inner.width / scale;
+      const height = inner.height / scale;
+      const target = {
+        x: (cursor.x - outer.x) / scale,
+        y: (cursor.y - outer.y) / scale,
+      };
+      if (
+        target.x < 14 ||
+        target.y < 14 ||
+        target.x > width - 14 ||
+        target.y > height - 14
+      ) {
+        return;
+      }
+      const origin = mouthPoint(width, height);
+      const distance = Math.hypot(target.x - origin.x, target.y - origin.y);
+      const maxReach = TONGUE_FRAME_PX * (TONGUE_FRAMES - 1);
+      if (distance < 26 || distance > maxReach) return;
+
+      const maxFrame = Math.min(
+        TONGUE_FRAMES - 1,
+        Math.max(1, Math.round(distance / TONGUE_FRAME_PX)),
+      );
+      const unit = {
+        x: (target.x - origin.x) / distance,
+        y: (target.y - origin.y) / distance,
+      };
+      const id = ++tongueId.current;
+      playCroak();
+      setTongue({ id, origin, target, frame: 0, maxFrame });
+
+      // Where the tongue base sits on screen, for dragging the real pointer
+      // back into his mouth as the tongue retracts.
+      const tipOrigin = {
+        x: outer.x + origin.x * scale,
+        y: outer.y + origin.y * scale,
+      };
+      const outMs = 220;
+      const holdMs = 110;
+      const backMs = 200;
+      const total = outMs + holdMs + backMs;
+      const started = performance.now();
+
+      const step = (now: number) => {
+        if (cancelled) {
+          setTongue(null);
+          tongueAnimation.current = null;
+          return;
+        }
+        const t = now - started;
+        if (t >= total) {
+          setTongue(null);
+          tongueAnimation.current = null;
+          // The real cursor goes down the hatch and stays with him.
+          setStolen(true);
+          return;
+        }
+        const frame =
+          t < outMs
+            ? Math.round((t / outMs) * maxFrame)
+            : t < total - backMs
+              ? maxFrame
+              : Math.round(((total - t) / backMs) * maxFrame);
+        setTongue((current) =>
+          current && current.id === id ? { ...current, frame } : current,
+        );
+        if (t >= total - backMs) {
+          const reach = frame * TONGUE_FRAME_PX * scale;
+          void invoke("warp_cursor", {
+            x: tipOrigin.x + unit.x * reach,
+            y: tipOrigin.y + unit.y * reach,
+            scale,
+          });
+        }
+        tongueAnimation.current = requestAnimationFrame(step);
+      };
+      tongueAnimation.current = requestAnimationFrame(step);
+    };
+
+    const roam = async () => {
+      const win = getCurrentWindow();
+      const cursor = await cursorPosition();
+      const monitor =
+        (await monitorFromPoint(cursor.x, cursor.y)) ??
+        (await currentMonitor());
+      if (!monitor) return;
+
+      const [scale, size] = await Promise.all([
+        win.scaleFactor(),
+        win.outerSize(),
+      ]);
+      const cssWidth = size.width / scale;
+      const cssHeight = size.height / scale;
+      const mouth = mouthPoint(cssWidth, cssHeight);
+
+      const minX = monitor.position.x + 8;
+      const maxX = Math.max(
+        minX,
+        monitor.position.x + monitor.size.width - size.width - 8,
+      );
+      // Keep clear of the menu bar / notch.
+      const minY = monitor.position.y + 40;
+      const maxY = Math.max(
+        minY,
+        monitor.position.y + monitor.size.height - size.height - 8,
+      );
+
+      // Mostly chase the cursor; once he has it, just wander with his prize.
+      const chase = !stolen && Math.random() < 0.7;
+      let originX: number;
+      let originY: number;
+      if (chase) {
+        // Pick a point above his mouth that the tongue can reach, then park
+        // the window so that point lands under the cursor.
+        const angle = -Math.PI * (0.08 + Math.random() * 0.84);
+        const radius = 110 + Math.random() * 100;
+        const aimX = clamp(mouth.x + Math.cos(angle) * radius, 28, cssWidth - 28);
+        const aimY = clamp(mouth.y + Math.sin(angle) * radius, 28, cssHeight - 28);
+        originX = clamp(cursor.x - aimX * scale, minX, maxX);
+        originY = clamp(cursor.y - aimY * scale, minY, maxY);
+      } else {
+        originX = minX + Math.random() * (maxX - minX);
+        originY = minY + Math.random() * (maxY - minY);
+      }
+
+      await hopTo(originX, originY);
+      if (cancelled) return;
+
+      await sleep(240);
+      if (!cancelled) await shoot();
+    };
+
+    const schedule = () => {
+      timer = window.setTimeout(
+        () => {
+          void roam()
+            .catch(() => {
+              // Window APIs unavailable (browser preview).
+            })
+            .finally(() => {
+              if (!cancelled) schedule();
+            });
+        },
+        3200 + Math.random() * 4200,
+      );
+    };
+
+    schedule();
+    return () => {
+      cancelled = true;
+      setRoamingHop(false);
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [mode, roamEnabled, held, flying, entrance, intervention, stolen]);
+
+  // Leaving Fun mode gives the cursor back.
+  useEffect(() => {
+    if (mode === "fun") return;
+    setStolen(false);
+    if (tongueAnimation.current !== null) {
+      cancelAnimationFrame(tongueAnimation.current);
+      tongueAnimation.current = null;
+    }
+    setTongue(null);
+  }, [mode]);
+
+  // While he holds the cursor, keep the real pointer in his mouth so it rides
+  // along on every hop. Click him (or leave Fun mode) to take it back; either
+  // way he only gets it for CURSOR_STEAL_MS.
+  useEffect(() => {
+    if (!stolen) return;
+    let disposed = false;
+    let raf = 0;
+    let inFlight = false;
+    const release = window.setTimeout(() => {
+      setStolen(false);
+      setTongue(null);
+    }, CURSOR_STEAL_MS);
+
+    const tick = async () => {
+      if (disposed || inFlight) return;
+      inFlight = true;
+      try {
+        const win = getCurrentWindow();
+        const [outer, inner, scale] = await Promise.all([
+          win.outerPosition(),
+          win.innerSize(),
+          win.scaleFactor(),
+        ]);
+        const mouth = mouthPoint(inner.width / scale, inner.height / scale);
+        void invoke("warp_cursor", {
+          x: outer.x + mouth.x * scale,
+          y: outer.y + mouth.y * scale,
+          scale,
+        });
+      } catch {
+        // Window APIs unavailable (browser preview).
+      } finally {
+        inFlight = false;
+        if (!disposed) raf = requestAnimationFrame(tick);
+      }
+    };
+
+    void tick();
+    return () => {
+      disposed = true;
+      window.clearTimeout(release);
+      cancelAnimationFrame(raf);
+    };
+  }, [stolen]);
+
+  // Drop an in-flight tongue when the window goes away.
+  useEffect(
+    () => () => {
+      if (tongueAnimation.current !== null) {
+        cancelAnimationFrame(tongueAnimation.current);
+        tongueAnimation.current = null;
+      }
+    },
+    [],
+  );
+
   const croaking = mood === "croaking";
   const curious = mood === "curious";
   const grumpy = mood === "grumpy";
-  // Croaking along runs slow and deliberate; curiosity is a quicker riff.
-  const animation: AnimationName = croaking || curious ? "croak" : "idle";
-  const framesPerSecond = croaking ? 2.5 : curious ? 8 : 6;
+  // Croaking along runs slow and deliberate; curiosity is a quicker riff. A
+  // roaming leap plays the spritesheet's hop row at ten frames a second.
+  const animation: AnimationName = tongue
+    ? "croak"
+    : roamingHop
+      ? "hop"
+      : croaking || curious
+        ? "croak"
+        : "idle";
+  const framesPerSecond = tongue
+    ? 12
+    : roamingHop
+      ? 10
+      : croaking
+        ? 2.5
+        : curious
+          ? 8
+          : 6;
   const frame = useSpriteFrame(animation, framesPerSecond);
   // Carried and airborne poses come from fixed frames rather than the mood
   // loop: dangling while held, wide-eyed and stretched while thrown, the croak
@@ -667,6 +1018,11 @@ export function FeelingFrog({
           column: ANIMATIONS.jump.column + HELD_FRAMES[heldPose],
           row: ANIMATIONS.jump.row,
         }
+      : roamingHop
+        ? {
+            column: ANIMATIONS.hop.column + frame,
+            row: ANIMATIONS.hop.row,
+          }
       : breathPhase
         ? {
             column: ANIMATIONS.croak.column + breathFrame,
@@ -686,6 +1042,15 @@ export function FeelingFrog({
 
   const sheetColumn = pose.column;
   const sheetRow = pose.row;
+
+  const tongueAngle = tongue
+    ? (Math.atan2(
+        tongue.target.y - tongue.origin.y,
+        tongue.target.x - tongue.origin.x,
+      ) *
+        180) /
+      Math.PI
+    : 0;
 
   return (
     <div className="relative h-full w-full">
@@ -789,6 +1154,28 @@ export function FeelingFrog({
         </span>
       </motion.button>
       </div>
+
+      {/* Fun mode: a sprite-animated tongue snaps out and drags the cursor in. */}
+      {tongue && (
+        <div aria-hidden className="pointer-events-none absolute inset-0">
+          <span
+            className="absolute block"
+            style={{
+              left: tongue.origin.x,
+              top: tongue.origin.y - TONGUE_H / 2,
+              width: TONGUE_CELL_W,
+              height: TONGUE_H,
+              backgroundImage: `url(${tongueSpritesheet})`,
+              backgroundSize: `${TONGUE_CELL_W * TONGUE_FRAMES}px ${TONGUE_H}px`,
+              backgroundPosition: `${-tongue.frame * TONGUE_CELL_W}px 0px`,
+              backgroundRepeat: "no-repeat",
+              imageRendering: "pixelated",
+              transformOrigin: "0 50%",
+              rotate: `${tongueAngle}deg`,
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }

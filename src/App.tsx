@@ -168,6 +168,9 @@ export default function App() {
         onGrounding={openGrounding}
         onCarry={setCarrying}
         breathPhase={activity === "belly_breathe" ? breathPhase : null}
+        roamEnabled={
+          activity === null && selectionOffer === null && !needsAccessibility
+        }
       />
       <BreatheAlong
         open={activity === "belly_breathe"}
