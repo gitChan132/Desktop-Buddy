@@ -54,7 +54,7 @@ fn doomscroll_scrolls() -> usize {
 }
 
 /// Back-and-forth cursor reversals needed within the oscillation window before
-/// it counts as stress. Set high â€” ordinary cursor moves flip direction often.
+/// it counts as stress. Set high — ordinary cursor moves flip direction often.
 const OSCILLATION_MIN_REVERSALS: usize = 14;
 
 fn shorts_scrolls() -> usize {
@@ -89,7 +89,7 @@ const LLM_TIMEOUT: Duration = Duration::from_secs(15);
 
 const SYSTEM_PROMPT: &str = "You are The Feeling Frog, an empathetic, cozy amphibian desktop companion. \
 The user is showing signs of burnout at their computer; you notice the pattern but never scold. \
-Speak gently and warmly, with occasional subtle frog charm (a soft *ribbit* now and then) â€” never annoying, \
+Speak gently and warmly, with occasional subtle frog charm (a soft *ribbit* now and then) — never annoying, \
 never nagging, never a lecture. Never use pet names or terms of endearment (no \"little friend\", \"dear\", \
 \"buddy\", \"my friend\", \"little one\"); address the user plainly and directly. You are given a `detected` \
 field describing exactly what gave them away; weave that detail into your message in a light, humorous way \
@@ -111,6 +111,9 @@ pub struct FrogInterventionPayload {
     pub suggested_action: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_app: Option<String>,
+    /// Fired from the pond's Testing tab: never auto-dismisses.
+    #[serde(default)]
+    pub demo: bool,
 }
 
 fn severity_for(score: u8) -> &'static str {
@@ -175,7 +178,7 @@ fn build_intervention(
         (
             "frantic_typing",
             format!(
-                "*ribbit* {} keystrokes in 30 seconds â€” your keys are hopping faster than me. Let's slow the pond down for one breath.",
+                "*ribbit* {} keystrokes in 30 seconds — your keys are hopping faster than me. Let's slow the pond down for one breath.",
                 typing.keys_in_window
             ),
             "belly_breathe",
@@ -184,7 +187,7 @@ fn build_intervention(
         (
             "cursor_hesitation",
             format!(
-                "*ribbit* That cursor rested a while before clicking â€” {} hesitant clicks in the last 30 seconds. Your pond has plenty of lily pads; take one slow breath and pick one.",
+                "*ribbit* That cursor rested a while before clicking — {} hesitant clicks in the last 30 seconds. Your pond has plenty of lily pads; take one slow breath and pick one.",
                 windows.hesitant_clicks
             ),
             "belly_breathe",
@@ -193,7 +196,7 @@ fn build_intervention(
         (
             "cursor_oscillation",
             format!(
-                "*ribbit* Your cursor is hopping back and forth across the pond â€” {} reversals in a few seconds. When you can't pick a lily pad, start with the smallest one and breathe.",
+                "*ribbit* Your cursor is hopping back and forth across the pond — {} reversals in a few seconds. When you can't pick a lily pad, start with the smallest one and breathe.",
                 windows.direction_reversals
             ),
             "belly_breathe",
@@ -239,6 +242,7 @@ fn build_intervention(
         message,
         suggested_action: suggested_action.to_string(),
         active_app,
+        demo: false,
     })
 }
 
@@ -316,18 +320,21 @@ fn cooldown() -> &'static Mutex<Option<Instant>> {
 //         .unwrap_or(INTERVENTION_COOLDOWN)
 // }
 
-/// Activities that suit a trigger, most apt first. The first is the
-/// deterministic fallback; at fire time one of them is chosen at random.
+/// Every activity a trigger can open, most apt first. All four guides can be
+/// offered for any trigger; the order only expresses aptness. The first is the
+/// deterministic fallback, and fired nudges rotate down the list.
 fn suggested_actions_for(trigger: &str) -> &'static [&'static str] {
     match trigger {
-        "backspace_loop" | "frantic_typing" => &["belly_breathe", "mindful_pause"],
-        "cursor_hesitation" | "cursor_oscillation" => {
-            &["belly_breathe", "mindful_pause", "task_intent"]
+        "backspace_loop" | "frantic_typing" => {
+            &["belly_breathe", "mindful_pause", "task_intent", "visual_grounding"]
         }
-        "tab_thrashing" => &["task_intent", "mindful_pause", "visual_grounding"],
-        "idle_freeze" => &["visual_grounding", "mindful_pause", "task_intent"],
-        "doomscroll" => &["visual_grounding", "mindful_pause"],
-        _ => &["belly_breathe"],
+        "cursor_hesitation" | "cursor_oscillation" => {
+            &["belly_breathe", "mindful_pause", "task_intent", "visual_grounding"]
+        }
+        "tab_thrashing" => &["task_intent", "mindful_pause", "visual_grounding", "belly_breathe"],
+        "idle_freeze" => &["visual_grounding", "mindful_pause", "task_intent", "belly_breathe"],
+        "doomscroll" => &["visual_grounding", "mindful_pause", "task_intent", "belly_breathe"],
+        _ => &["belly_breathe", "mindful_pause", "task_intent", "visual_grounding"],
     }
 }
 
@@ -336,8 +343,20 @@ fn suggested_action_for(trigger: &str) -> &'static str {
     suggested_actions_for(trigger)[0]
 }
 
-/// Picks one of the trigger's apt activities. Varies per intervention using
-/// sub-second wall-clock entropy, so no extra RNG dependency is needed.
+/// Most recently offered activity, so the next nudge cycles to the next apt
+/// option instead of repeating itself.
+static LAST_ACTION: Mutex<Option<&'static str>> = Mutex::new(None);
+
+/// Next activity in rank order after `last`, wrapping around. When `last` is not
+/// in the list (or nothing has been offered yet) the most apt option wins.
+fn next_action(actions: &[&'static str], last: Option<&str>) -> &'static str {
+    last.and_then(|last| actions.iter().position(|action| *action == last))
+        .map(|index| actions[(index + 1) % actions.len()])
+        .unwrap_or(actions[0])
+}
+
+/// Picks one of the trigger's apt activities, rotating away from whichever was
+/// offered most recently so consecutive nudges do not repeat a guide.
 fn pick_suggested_action(trigger: &str) -> &'static str {
     let actions = suggested_actions_for(trigger);
     let enabled: Vec<&'static str> = actions
@@ -350,14 +369,12 @@ fn pick_suggested_action(trigger: &str) -> &'static str {
         // so the nudge still has something to open.
         return actions[0];
     }
-    if enabled.len() == 1 {
-        return enabled[0];
+    let last = LAST_ACTION.lock().ok().and_then(|slot| *slot);
+    let chosen = next_action(&enabled, last);
+    if let Ok(mut slot) = LAST_ACTION.lock() {
+        *slot = Some(chosen);
     }
-    let seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|elapsed| elapsed.subsec_nanos() as usize)
-        .unwrap_or(0);
-    enabled[seed % enabled.len()]
+    chosen
 }
 
 /// Reads `GEMINI_API_KEY`, loading `.env.local` when the app was started without it.
@@ -466,7 +483,30 @@ pub async fn trigger_frog_intervention(
     detected: String,
     fallback_message: String,
 ) -> Option<FrogInterventionPayload> {
-    {
+    emit_intervention(
+        app,
+        trigger,
+        window_title,
+        detected,
+        fallback_message,
+        telemetry::pond_stress(),
+        false,
+    )
+    .await
+}
+
+/// Shared emission path. Demo nudges skip the cooldown and the LLM call, and
+/// carry `demo: true` so the frog leaves the bubble up until it is dismissed.
+async fn emit_intervention(
+    app: AppHandle,
+    trigger: String,
+    window_title: String,
+    detected: String,
+    fallback_message: String,
+    stress: f32,
+    demo: bool,
+) -> Option<FrogInterventionPayload> {
+    if !demo {
         let mut last = cooldown()
             .lock()
             .expect("intervention cooldown lock poisoned");
@@ -476,25 +516,25 @@ pub async fn trigger_frog_intervention(
         *last = Some(Instant::now());
     }
 
-    let score = (telemetry::pond_stress() * 100.0).round() as u8;
+    let score = (stress * 100.0).round() as u8;
+    // The trigger→activity mapping is authoritative and rotates for variety;
+    // the model only writes the copy, and demos use the same rotation.
     let mut payload = FrogInterventionPayload {
         id: next_id(),
         trigger: trigger.clone(),
         severity: severity_for(score).to_string(),
         message: fallback_message,
-        suggested_action: suggested_action_for(&trigger).to_string(),
+        suggested_action: pick_suggested_action(&trigger).to_string(),
         active_app: Some(window_title.clone()),
+        demo,
     };
 
-    match ask_llm(&trigger, &window_title, &detected).await {
-        Ok(reply) => {
-            payload.message = reply.message;
-            // The triggerâ†’activity mapping is authoritative: each activity has its
-            // own detection signal, so the model only writes the copy.
-            payload.suggested_action = pick_suggested_action(&trigger).to_string();
-        }
-        Err(error) => {
-            eprintln!("[ai_engine] intervention LLM unavailable, using fallback: {error}");
+    if !demo {
+        match ask_llm(&trigger, &window_title, &detected).await {
+            Ok(reply) => payload.message = reply.message,
+            Err(error) => {
+                eprintln!("[ai_engine] intervention LLM unavailable, using fallback: {error}");
+            }
         }
     }
 
@@ -505,6 +545,107 @@ pub async fn trigger_frog_intervention(
     eprintln!("[ai_engine] emitted trigger={}", payload.trigger);
 
     Some(payload)
+}
+
+/// Detector ids the Testing tab can fire; keep in sync with `TRIGGER_ROWS`.
+const DEMO_TRIGGERS: [&str; 7] = [
+    "frantic_typing",
+    "backspace_loop",
+    "tab_thrashing",
+    "idle_freeze",
+    "cursor_hesitation",
+    "cursor_oscillation",
+    "doomscroll",
+];
+
+/// Cheap per-click randomness without pulling in a crate.
+fn rand_between(low: u64, high: u64) -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or(0);
+    hasher.write_u128(nanos);
+    low + hasher.finish() % (high - low + 1)
+}
+
+/// Synthetic snapshots whose counts sit above the chosen detector's threshold
+/// (randomized each click) and leave every other detector quiet.
+fn demo_snapshot(trigger: &str) -> (TypingSnapshot, WindowSnapshot, ScrollSnapshot) {
+    let mut typing = TypingSnapshot::default();
+    let mut windows = WindowSnapshot {
+        active_app: Some(crate::window_tracker::ActiveApp {
+            app_name: "Google Chrome".to_string(),
+            title: "Final Essay - Google Docs".to_string(),
+        }),
+        stress_score: rand_between(60, 95) as f32 / 100.0,
+        ..WindowSnapshot::default()
+    };
+    let mut scrolls = ScrollSnapshot::default();
+
+    match trigger {
+        "frantic_typing" => typing.keys_in_window = rand_between(181, 260) as usize,
+        "backspace_loop" => {
+            typing.backspaces_in_window = rand_between(37, 55) as usize;
+            typing.backspace_streak = rand_between(8, 14) as u32;
+            typing.keys_in_window = typing.backspaces_in_window + rand_between(10, 30) as usize;
+        }
+        "tab_thrashing" => {
+            windows.switches_in_window = rand_between(6, 12) as usize;
+            windows.tab_thrashing = true;
+        }
+        "idle_freeze" => windows.idle_freeze = true,
+        "cursor_hesitation" => {
+            windows.hesitant_clicks = rand_between(3, 7) as usize;
+            windows.mean_hesitation_secs = rand_between(22, 30) as f32 / 10.0;
+        }
+        "cursor_oscillation" => windows.direction_reversals = rand_between(14, 24) as usize,
+        "doomscroll" => {
+            windows.active_app = Some(crate::window_tracker::ActiveApp {
+                app_name: "Google Chrome".to_string(),
+                title: "Reddit - Dive into anything".to_string(),
+            });
+            windows.on_feed = true;
+            windows.feed_seconds = rand_between(240, 420);
+            scrolls.scrolls_in_window = rand_between(40, 70) as usize;
+            scrolls.scrolls_in_30s = scrolls.scrolls_in_window;
+        }
+        _ => {}
+    }
+
+    (typing, windows, scrolls)
+}
+
+/// Testing-tab entry point: feeds one detector a random count above threshold
+/// and emits the resulting nudge. No cooldown, no dismissal timer.
+pub async fn trigger_demo(
+    app: AppHandle,
+    trigger: String,
+) -> Result<FrogInterventionPayload, String> {
+    if !DEMO_TRIGGERS.contains(&trigger.as_str()) {
+        return Err(format!("unknown trigger: {trigger}"));
+    }
+    let (typing, windows, scrolls) = demo_snapshot(&trigger);
+    let candidate = build_intervention(&typing, &windows, &scrolls)
+        .ok_or_else(|| format!("{trigger} is muted in Settings"))?;
+    let window_title = windows
+        .active_app
+        .as_ref()
+        .map(|app| app.title.clone())
+        .unwrap_or_default();
+    let detected = detection_detail(&candidate.trigger, &typing, &windows, &scrolls);
+    emit_intervention(
+        app,
+        candidate.trigger,
+        window_title,
+        detected,
+        candidate.message,
+        windows.stress_score,
+        true,
+    )
+    .await
+    .ok_or_else(|| "could not emit the demo nudge".to_string())
 }
 
 /// Starts the periodic evaluation loop that emits `trigger-intervention` events.
@@ -757,12 +898,32 @@ mod tests {
                 actions.iter().all(|action| valid.contains(action)),
                 "{trigger} lists an unknown action"
             );
+            // Any trigger can offer any guide; the list only ranks aptness.
+            for action in valid {
+                assert!(actions.contains(&action), "{trigger} cannot offer {action}");
+            }
         }
         // Repeated picks always land inside the trigger's ranked list.
         for _ in 0..20 {
             let picked = pick_suggested_action("tab_thrashing");
             assert!(suggested_actions_for("tab_thrashing").contains(&picked));
         }
+    }
+
+    #[test]
+    fn next_action_rotates_and_wraps() {
+        let actions = ["belly_breathe", "mindful_pause", "task_intent"];
+        // No history: most apt option wins.
+        assert_eq!(next_action(&actions, None), "belly_breathe");
+        // After each offer, move down the ranked list.
+        assert_eq!(next_action(&actions, Some("belly_breathe")), "mindful_pause");
+        assert_eq!(next_action(&actions, Some("mindful_pause")), "task_intent");
+        // Wrap back to the top.
+        assert_eq!(next_action(&actions, Some("task_intent")), "belly_breathe");
+        // A last action from another trigger's list falls back to the best one.
+        assert_eq!(next_action(&actions, Some("visual_grounding")), "belly_breathe");
+        // Single-option lists still resolve.
+        assert_eq!(next_action(&actions[..1], Some("belly_breathe")), "belly_breathe");
     }
 
     #[test]

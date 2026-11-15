@@ -34,7 +34,7 @@ const IDLE_FRAMES = 4;
 /** Small wait helper for the entrance choreography. */
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-type View = "status" | "settings" | "activities" | "modes";
+type View = "status" | "settings" | "activities" | "modes" | "testing";
 
 interface PondStats {
   stress: number;
@@ -312,6 +312,7 @@ export function SettingsPond() {
   const [running, setRunning] = useState<{ id: ActivityId; step: number } | null>(null);
   const [turnRow, setTurnRow] = useState<number | null>(null);
   const [visible, setVisible] = useState(false);
+  const [demoStatus, setDemoStatus] = useState<string | null>(null);
   const runId = useRef(0);
   const lastDirection = useRef<"left" | "right">("right");
   const landedRef = useRef(false);
@@ -465,7 +466,8 @@ export function SettingsPond() {
           if (
             requested.tab === "activities" ||
             requested.tab === "modes" ||
-            requested.tab === "settings"
+            requested.tab === "settings" ||
+            requested.tab === "testing"
           ) {
             setView(requested.tab);
           } else {
@@ -575,6 +577,26 @@ export function SettingsPond() {
     void saveActivityEnabled(id, enabled).catch(() => {});
   };
 
+  // Testing tab: fire a detector with synthetic input, then hand the stage back
+  // to the frog so the nudge is visible.
+  const fireDemo = async (trigger: TriggerId) => {
+    setDemoStatus(`Firing ${trigger}…`);
+    try {
+      await invoke("demo_trigger", { trigger });
+      await invoke("hide_pond");
+      setDemoStatus(null);
+    } catch (error) {
+      setDemoStatus(String(error));
+    }
+  };
+
+  const fireRandomDemo = () => {
+    const enabled = TRIGGER_ROWS.filter((row) => settings.triggers[row.key]);
+    const pick = enabled[Math.floor(Math.random() * enabled.length)];
+    if (pick) void fireDemo(pick.id);
+    else setDemoStatus("All triggers are muted in Settings.");
+  };
+
   const stress = stats?.stress ?? 0;
   const focus = stats?.focus ?? 0;
   const stressHistory = history.map((sample) => sample.stress);
@@ -590,7 +612,9 @@ export function SettingsPond() {
         ? "Activities"
         : view === "modes"
           ? "Modes"
-          : "Pond status";
+          : view === "testing"
+            ? "Testing"
+            : "Pond status";
 
   return (
     <div
@@ -678,8 +702,63 @@ export function SettingsPond() {
               >
                 Modes
               </button>
+              <button
+                type="button"
+                onClick={() => setView("testing")}
+                className="pixel-button flex-1 px-1.5 py-1 text-[12px] uppercase leading-none text-emerald-900"
+              >
+                Test
+              </button>
             </div>
           </>
+        )}
+
+        {view === "testing" && (
+          <div className="mt-1 flex flex-1 flex-col overflow-y-auto pr-1">
+            <p className="text-[11px] uppercase tracking-[0.08em] text-emerald-200/60">
+              Demo a detector
+            </p>
+            <p className="mt-1 text-[12px] leading-[1.15] text-emerald-100/80">
+              Each button feeds the real detector a random count above its
+              threshold, skips the cooldown, and leaves the nudge up until you
+              dismiss it. The pond closes so the frog can show you.
+            </p>
+
+            <div className="mt-2 flex flex-col gap-1">
+              {TRIGGER_ROWS.map((row) => {
+                const on = settings.triggers[row.key];
+                return (
+                  <button
+                    key={row.id}
+                    type="button"
+                    disabled={!on}
+                    onClick={() => void fireDemo(row.id)}
+                    className="pixel-button px-2 py-1 text-left text-[13px] uppercase leading-none text-emerald-900 disabled:opacity-40"
+                  >
+                    {row.label}
+                    {!on && (
+                      <span className="ml-1 text-[11px] normal-case text-emerald-900/60">
+                        (muted)
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={fireRandomDemo}
+                className="pixel-button px-2 py-1 text-left text-[13px] uppercase leading-none text-emerald-900"
+              >
+                Random trigger
+              </button>
+            </div>
+
+            {demoStatus && (
+              <p className="mt-2 text-[11px] leading-[1.1] text-amber-200">
+                {demoStatus}
+              </p>
+            )}
+          </div>
         )}
 
         {view === "settings" && (

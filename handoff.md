@@ -29,16 +29,16 @@ Clicking the frog also opens a persona-locked chat (`src-tauri/src/chat.rs`).
 - Frontend also has the draggable frog with carry physics and the 10s speech bubble.
 
 ### Triggers
-| Trigger | Detection | Ranked activities (first = fallback) | e2e |
+| Trigger | Detection | Ranked activities (first = fallback; every trigger can offer all four) | e2e |
 | --- | --- | --- | --- |
-| `frantic_typing` | ≥180 keys / 30s | breathe, pause | ✅ |
-| `backspace_loop` | ≥36 backspaces / 30s **or** streak ≥8 | breathe, pause | ✅ |
-| `cursor_hesitation` | ≥3 clicks, each after ≥2s stillness / 30s | breathe, pause, intent | ✅ |
-| `cursor_oscillation` | ≥14 horizontal reversals / 10s | breathe, pause, intent | ✅ |
-| `tab_thrashing` | >5 switches / 20s (same-site tabs excluded) | intent, pause, grounding | ✅ |
-| `idle_freeze` | ≥150s zero input, browser/editor frontmost | grounding, pause, intent | ✅ |
-| `doomscroll` | feed frontmost ≥4 min, ≥40 scrolls / 90s, <10 keys / 30s | grounding, pause | ✅ |
-| `doomscroll` (Shorts) | YouTube/Shorts tab ≥30s, ≥6 flips or scrolls / 30s, <10 keys | grounding, pause | ✅ |
+| `frantic_typing` | ≥180 keys / 30s | breathe, pause, intent, grounding | ✅ |
+| `backspace_loop` | ≥36 backspaces / 30s **or** streak ≥8 | breathe, pause, intent, grounding | ✅ |
+| `cursor_hesitation` | ≥3 clicks, each after ≥2s stillness / 30s | breathe, pause, intent, grounding | ✅ |
+| `cursor_oscillation` | ≥14 horizontal reversals / 10s | breathe, pause, intent, grounding | ✅ |
+| `tab_thrashing` | >5 switches / 20s (same-site tabs excluded) | intent, pause, grounding, breathe | ✅ |
+| `idle_freeze` | ≥150s zero input, browser/editor frontmost | grounding, pause, intent, breathe | ✅ |
+| `doomscroll` | feed frontmost ≥4 min, ≥40 scrolls / 90s, <10 keys / 30s | grounding, pause, intent, breathe | ✅ |
+| `doomscroll` (Shorts) | YouTube/Shorts tab ≥30s, ≥6 flips or scrolls / 30s, <10 keys | grounding, pause, intent, breathe | ✅ |
 
 Priority: short-form → backspace_loop → frantic_typing → cursor_hesitation →
 cursor_oscillation → tab_thrashing → doomscroll → idle_freeze.
