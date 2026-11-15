@@ -339,6 +339,7 @@ fn suggested_actions_for(trigger: &str) -> &'static [&'static str] {
 }
 
 /// Most apt activity for the trigger (kept deterministic for tests).
+#[cfg(test)]
 fn suggested_action_for(trigger: &str) -> &'static str {
     suggested_actions_for(trigger)[0]
 }
@@ -495,8 +496,9 @@ pub async fn trigger_frog_intervention(
     .await
 }
 
-/// Shared emission path. Demo nudges skip the cooldown and the LLM call, and
-/// carry `demo: true` so the frog leaves the bubble up until it is dismissed.
+/// Shared emission path. Demo nudges skip only the cooldown; they still go
+/// through the LLM so testing never shows the same canned line twice, and they
+/// carry `demo: true` for the frontend.
 async fn emit_intervention(
     app: AppHandle,
     trigger: String,
@@ -529,12 +531,10 @@ async fn emit_intervention(
         demo,
     };
 
-    if !demo {
-        match ask_llm(&trigger, &window_title, &detected).await {
-            Ok(reply) => payload.message = reply.message,
-            Err(error) => {
-                eprintln!("[ai_engine] intervention LLM unavailable, using fallback: {error}");
-            }
+    match ask_llm(&trigger, &window_title, &detected).await {
+        Ok(reply) => payload.message = reply.message,
+        Err(error) => {
+            eprintln!("[ai_engine] intervention LLM unavailable, using fallback: {error}");
         }
     }
 
