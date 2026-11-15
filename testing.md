@@ -82,6 +82,7 @@ Open from the tray menu → **Control panel** → big pond window. Tabs:
 - [ ] **Settings** — see section 8.
 - [ ] **Activities** — list of guides with descriptions, can start one.
 - [ ] **Modes** — Focus / Chill / Fun with descriptions; current mode highlighted.
+- [ ] Opening the pond while in **Fun** switches the mode to **Chill** (and the frog stops roaming after it closes).
 - [ ] **Testing** — see section 9.
 - [ ] Frog hops onto the pond lilypad when it opens; drops back down when it closes.
 - [ ] Moving the pond window doesn't break the hop/drop.

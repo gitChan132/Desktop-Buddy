@@ -208,8 +208,12 @@ settings), and the status panel has **Activities** and **Modes** buttons.
   (belly breathing drives the croak-row puff frames via `useBreathFrame`, other
   activities croak on each new line). Belly breathing loops until **Stop**;
   the others end on their own.
-- **Modes** — Focus / Chill / Fun buttons with blurbs, local selection only
-  (not wired to behaviour yet, per the brief).
+- **Modes** — Focus / Chill / Fun buttons with blurbs. The selection is persisted
+  via `set_mode` and drives the real cooldowns (Focus 25 s, Fun 30 s, Chill 120 s),
+  the doomscroll mute in Chill, and Fun's desktop roaming + cursor stealing.
+  Opening the pond from **Fun** automatically switches to **Chill** in
+  `open_pond` (a wind-down), and the pond re-reads settings on every show so its
+  highlight matches even if the broadcast landed while hidden.
 
 Entry points: the small popover has **Activities** and **Modes** buttons that
 call `open_pond` with a tab. The requested tab is stored in a `(tab, seq)` pair

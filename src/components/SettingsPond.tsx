@@ -520,7 +520,19 @@ export function SettingsPond() {
         }
         if (lastShowSeq.current !== requested.showSeq) {
           lastShowSeq.current = requested.showSeq;
-          if (requested.showSeq > 0) void runEntrance();
+          if (requested.showSeq > 0) {
+            // Opening the pond may have changed the mode (Fun → Chill in Rust),
+            // so re-read settings in case the broadcast landed while the hidden
+            // webview was throttled.
+            void loadSettings()
+              .then((next) => {
+                if (!live) return;
+                setSettings(next);
+                applySoundSettings(next);
+              })
+              .catch(() => {});
+            void runEntrance();
+          }
         }
       } catch {
         // Backend unavailable (browser preview).

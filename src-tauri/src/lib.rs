@@ -492,6 +492,13 @@ fn open_pond(app: AppHandle, tab: Option<String>) {
     position_pond_center(&pond);
     let _ = pond.show();
     let _ = pond.set_focus();
+    // Fun mode is a desktop game. Coming to the pond is a wind-down, so opening
+    // it leaves Fun mode and settles into Chill (the main window follows via the
+    // settings broadcast).
+    if settings::mode() == settings::Mode::Fun {
+        settings::set_mode("chill");
+        broadcast_settings(&app);
+    }
     let tab = tab.unwrap_or_else(|| "status".to_string());
     set_pond_tab(&tab);
     POND_SHOW_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
