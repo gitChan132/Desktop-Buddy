@@ -1,4 +1,4 @@
-# Handoff — desktop-buddy (The Feeling Frog)
+# Handoff — For Frog's Sake
 
 Read this first, then continue from "Next up".
 
@@ -27,6 +27,14 @@ Clicking the frog also opens a persona-locked chat (`src-tauri/src/chat.rs`).
   focused app's `AXSelectedText`; a 400+ char highlight that holds for two ticks makes the
   frog offer a summary via `selection-ready`. Verified in VS Code and Brave.
 - Frontend also has the draggable frog with carry physics and the 10s speech bubble.
+- **Fun mode** roams the desktop, hops near the cursor and flicks his tongue at it.
+  The tongue steals the real pointer (warped into his mouth every frame, so it rides
+  along on hops) for at most **5s** (`CURSOR_STEAL_MS`) or until clicked; leaving Fun
+  mode or clicking him returns it. Interventions are **suppressed in Fun mode** — the
+  evaluation loop skips entirely, as if nudges were paused.
+- Branding: product/title/crate/package are **For Frog's Sake**
+  (`com.forfrogsake.app`); app + tray icon is the green idle frog frame, generated
+  from `src/assets/frog/green_spritesheet.png` via `src-tauri/icons/icon-source.png`.
 
 ### Triggers
 | Trigger | Detection | Ranked activities (first = fallback; every trigger can offer all four) | e2e |
@@ -86,6 +94,8 @@ writes the copy.
 - `settings::intervention_cooldown()` feeds `ai_engine.rs`; `settings::detector_enabled()`
   is what the detectors consult — Chill mutes `doomscroll` regardless of its toggle, while
   the toggle keeps its own state so leaving Chill restores it.
+- Fun mode never nudges: `ai_engine::start` skips its tick when `mode() == Mode::Fun`
+  (in addition to the `nudges_paused` check).
 
 ## Selection summaries (`src-tauri/src/selection.rs`)
 - Polls every 900 ms; needs ≥400 chars, stable for two ticks, 8000-char cap.
@@ -125,7 +135,7 @@ FROG_EVAL_SECS=5 FROG_IDLE_FREEZE_SECS=12 npm run tauri dev
 Click the frog with no nudge up to chat. Requires macOS **Accessibility** permission for
 the launching terminal. `cargo check` in `src-tauri/` must stay clean (known harmless
 warning: `block v0.1.6` future-incompat). Port 1420 must be free; kill stray
-`vite`/`desktop-buddy`/`tauri dev` first.
+`vite`/`for-frogs-sake`/`tauri dev` first.
 
 ## Test harness
 - `cd src-tauri && cargo test --lib` — deterministic, zero-wait unit tests for scoring,
@@ -133,7 +143,7 @@ warning: `block v0.1.6` future-incompat). Port 1420 must be free; kill stray
 - Injectors (pyobjc Quartz): `/tmp/inject_typing.py` (frantic), `/tmp/inject_hesitation.py`
   (click-after-stillness), `/tmp/inject_oscillation.py` (back-and-forth). Tab thrash: cycle
   `open -a Terminal/Safari/Finder`. Idle: focus Safari, no input.
-- After tests: `pkill -f "tauri dev"; pkill -f desktop-buddy; pkill -f vite;
+- After tests: `pkill -f "tauri dev"; pkill -f for-frogs-sake; pkill -f vite;
   lsof -ti tcp:1420 | xargs kill -9`.
 
 ## Next up

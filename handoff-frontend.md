@@ -1,9 +1,9 @@
-# Handoff — Frontend Track (Feeling Frog)
+# Handoff — Frontend Track (For Frog's Sake)
 
 Last updated: 2026-11-14
 Repo: `gitChan132/Desktop-Buddy` · branch `main`
 
-This is a catch-up note for the React/Tauri-overlay side of The Feeling Frog. Read
+This is a catch-up note for the React/Tauri-overlay side of For Frog's Sake. Read
 this first, then `src/components/FeelingFrog.tsx` — almost all the character work
 lives there.
 
