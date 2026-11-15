@@ -111,6 +111,12 @@ Last updated: 2026-11-14 · branch `main`
     element's `TextPattern` selection through UI Automation (MTA apartment on the
     watcher thread, `CurrentIsPassword` skipped). Verified with a 1.7k-character
     Notepad selection: offer → Gemini summary rendered above the frog.
+22. **The pond webview is hidden and reused, not recreated.** Its React state
+    survives a close, so on reopen the last landing's `visible` frog copy showed
+    on the lilypad for the ~300 ms before the `pond_tab` poll started the next
+    entrance (then vanished, then the real frog jumped in). `SettingsPond` now
+    resets `visible`/`turnRow` and bumps `runId` on `pond-hidden`, so the pad is
+    empty until the real frog lands. Do not drop that reset.
 
 ---
 

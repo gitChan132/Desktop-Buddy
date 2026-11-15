@@ -474,6 +474,22 @@ export function SettingsPond() {
     };
   }, [finishLanding]);
 
+  // The pond window is hidden and reused, so its last landing state survives.
+  // Clear the pad copy as soon as it hides: otherwise showing the window again
+  // flashes the old frog on the lilypad for the ~300 ms before the poll starts
+  // the next entrance (and a late landing loop must not restore it).
+  useEffect(() => {
+    const unlisten = listen("pond-hidden", () => {
+      runId.current += 1;
+      landedRef.current = false;
+      setVisible(false);
+      setTurnRow(null);
+    });
+    return () => {
+      void unlisten.then((off) => off());
+    };
+  }, []);
+
   // The popover can ask for a specific tab, and every open bumps a show counter.
   // Poll a (tab, seq, showSeq) triple instead of trusting an event payload: the
   // pond's webview may still be waking up when the request fires.
