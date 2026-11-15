@@ -68,14 +68,16 @@ unsafe extern "C" {
 
 /// Copies one attribute off an AX element; the returned value is owned (+1).
 #[cfg(target_os = "macos")]
-unsafe fn copy_attribute(element: AXUIElementRef, name: &str) -> Option<CFTypeRef> {
+fn copy_attribute(element: AXUIElementRef, name: &str) -> Option<CFTypeRef> {
     let attribute = CFString::from_str(name);
     let mut value: CFTypeRef = std::ptr::null();
-    let error = AXUIElementCopyAttributeValue(
-        element,
-        CFRetained::as_ptr(&attribute).as_ptr() as *const c_void,
-        &mut value,
-    );
+    let error = unsafe {
+        AXUIElementCopyAttributeValue(
+            element,
+            CFRetained::as_ptr(&attribute).as_ptr() as *const c_void,
+            &mut value,
+        )
+    };
     if error == 0 && !value.is_null() {
         Some(value)
     } else {
