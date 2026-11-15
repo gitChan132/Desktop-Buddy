@@ -593,10 +593,13 @@ export function FeelingFrog({
     });
 
     // The pond can close mid-flight; abort and put him back. This must not
-    // poison the next jump.
-    const unlistenHidden = listen("pond-hidden", () => {
+    // poison the next jump. When he had landed on the pad, Rust parks the
+    // overlay back on the landing spot and asks for a drop, which reuses the
+    // throw physics from a standstill.
+    const unlistenHidden = listen<{ drop?: boolean }>("pond-hidden", (event) => {
       activeRun += 1;
       setEntrance(null);
+      if (event.payload?.drop) void throwFrog([]);
     });
 
     // Polling fallback: the request is also stored in Rust, so the entrance

@@ -462,12 +462,26 @@ struct PendingJump {
     request: JumpRequest,
 }
 
+/// True while the real frog window is parked on the lilypad: he has landed,
+/// hidden himself behind the pond, and will be dropped back down when the pond
+/// closes.
+static POND_FROG_ON_PAD: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Payload of `pond-hidden`: `drop` tells the overlay to fall from the pad
+/// instead of simply reappearing at its old desktop spot.
+#[derive(Clone, serde::Serialize)]
+struct PondHidden {
+    drop: bool,
+}
+
 /// Asks the real frog window to turn and jump onto the pond. Rust relays the
 /// event so the request does not depend on the pond's webview emitting events.
 /// The request is also stored so the overlay can poll for it: events are not
 /// replayed to a webview that was asleep when they were emitted.
 #[tauri::command]
 fn start_pond_jump(app: AppHandle, request: JumpRequest) {
+    POND_FROG_ON_PAD.store(false, std::sync::atomic::Ordering::Release);
     if let Ok(mut pending) = POND_JUMP.lock() {
         *pending = Some(request.clone());
     }
@@ -498,6 +512,7 @@ fn pending_pond_jump(app: AppHandle) -> Option<PendingJump> {
 /// The frog has landed; tell the pond to take over with its own sprite.
 #[tauri::command]
 fn finish_pond_jump(app: AppHandle) {
+    POND_FROG_ON_PAD.store(true, std::sync::atomic::Ordering::Release);
     let _ = app.emit("pond-jump-done", ());
 }
 
@@ -513,14 +528,32 @@ fn hide_frog_overlay(app: AppHandle) {
     }
 }
 
-/// Closes the pond and brings the frog back to the desktop.
-#[tauri::command]
-fn hide_pond(app: AppHandle) {
+/// Closes the pond and brings the frog back. When he had landed on the pad, put
+/// the overlay back on the landing spot first: the frontend then drops him from
+/// the lilypad with the same physics as a mouse release.
+fn close_pond(app: &AppHandle) {
     if let Some(pond) = app.get_webview_window(POND_LABEL) {
         let _ = pond.hide();
     }
-    set_main_visible(&app, true);
-    let _ = app.emit("pond-hidden", ());
+    let mut drop = false;
+    if POND_FROG_ON_PAD.swap(false, std::sync::atomic::Ordering::AcqRel) {
+        let landing = POND_JUMP.lock().ok().and_then(|pending| pending.clone());
+        if let (Some(main), Some(request)) = (app.get_webview_window("main"), landing) {
+            let _ = main.set_position(PhysicalPosition::new(
+                request.target_x.round() as i32,
+                request.target_y.round() as i32,
+            ));
+            drop = true;
+        }
+    }
+    set_main_visible(app, true);
+    let _ = app.emit("pond-hidden", PondHidden { drop });
+}
+
+/// Closes the pond and brings the frog back to the desktop.
+#[tauri::command]
+fn hide_pond(app: AppHandle) {
+    close_pond(&app);
 }
 
 /// Opens the macOS Accessibility pane so the user can grant the selection
@@ -605,13 +638,10 @@ pub fn run() {
                 // A normal decorated window: the title-bar X should hide the
                 // pond and bring the frog back, not destroy the webview.
                 let pond_handle = app.handle().clone();
-                let pond_window = pond.clone();
                 pond.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
-                        let _ = pond_window.hide();
-                        set_main_visible(&pond_handle, true);
-                        let _ = pond_handle.emit("pond-hidden", ());
+                        close_pond(&pond_handle);
                     }
                 });
             }
