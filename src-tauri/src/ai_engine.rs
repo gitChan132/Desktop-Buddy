@@ -659,9 +659,9 @@ pub fn start(app: AppHandle) {
 
         loop {
             std::thread::sleep(evaluation_interval());
-            // Paused from the menu-bar control panel: keep the loop alive but
-            // never fire a nudge.
-            if settings::nudges_paused() {
+            // Paused from the menu-bar control panel, or the frog is off
+            // playing in Fun mode: keep the loop alive but never fire a nudge.
+            if settings::nudges_paused() || settings::mode() == settings::Mode::Fun {
                 continue;
             }
 
