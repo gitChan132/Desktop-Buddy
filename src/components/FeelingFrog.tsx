@@ -188,7 +188,10 @@ export function FeelingFrog({
   const tongueId = useRef(0);
   const tongueAnimation = useRef<number | null>(null);
   // True while a sprite-animated hop is travelling across the desktop.
-  const [roamingHop, setRoamingHop] = useState(false);
+  const [roamPose, setRoamPose] = useState<{
+    row: number;
+    column: number;
+  } | null>(null);
   // Once yoinked, he keeps the cursor and carries it around.
   const [stolen, setStolen] = useState(false);
   const [tilt, setTilt] = useState(0);
@@ -715,16 +718,37 @@ export function FeelingFrog({
     const clamp = (value: number, min: number, max: number) =>
       Math.min(Math.max(value, min), max);
 
-    // Leap to the new spot with the hop row of the spritesheet, arcing the
-    // window so the jump reads on screen instead of teleporting.
+    // Turn towards the landing spot, arc across the desktop playing the jump
+    // row from that facing, then turn back to the viewer.
     const hopTo = async (x: number, y: number) => {
       const win = getCurrentWindow();
       const start = await win.outerPosition();
-      setRoamingHop(true);
+      const right = x - start.x > 48;
+      const left = x - start.x < -48;
+      const facing = right ? 2 : left ? 6 : 0;
+      const turnIn = right ? [0, 1, 2] : left ? [0, 7, 6] : [];
+      const turnOut = right ? [1, 0] : left ? [7, 0] : [];
+      const stepMs = 85;
+      const showFacing = (row: number) => {
+        if (!cancelled) {
+          setRoamPose({ row, column: ANIMATIONS.idle.column });
+        }
+      };
+
+      for (const row of turnIn) {
+        showFacing(row);
+        await sleep(row === 0 ? 55 : stepMs);
+        if (cancelled) {
+          setRoamPose(null);
+          return;
+        }
+      }
+
       await new Promise<void>((resolve) => {
         const started = performance.now();
         const duration = 420;
         const lift = 90;
+        let shown = -1;
         const step = (now: number) => {
           if (cancelled) {
             resolve();
@@ -735,15 +759,33 @@ export function FeelingFrog({
           void win.setPosition(
             new PhysicalPosition(
               Math.round(start.x + (x - start.x) * ease),
-              Math.round(start.y + (y - start.y) * ease - Math.sin(Math.PI * t) * lift),
+              Math.round(
+                start.y + (y - start.y) * ease - Math.sin(Math.PI * t) * lift,
+              ),
             ),
           );
+          // Crouch, airborne stretch, land: the jump row's four cells.
+          const next = Math.min(3, Math.floor(t * 4));
+          if (next !== shown) {
+            shown = next;
+            setRoamPose({ row: facing, column: ANIMATIONS.jump.column + next });
+          }
           if (t < 1) requestAnimationFrame(step);
           else resolve();
         };
         requestAnimationFrame(step);
       });
-      if (!cancelled) setRoamingHop(false);
+
+      if (cancelled) {
+        setRoamPose(null);
+        return;
+      }
+      for (const row of turnOut) {
+        showFacing(row);
+        await sleep(stepMs);
+        if (cancelled) break;
+      }
+      setRoamPose(null);
     };
 
     // The tongue only reaches things inside the transparent window, so he
@@ -907,7 +949,7 @@ export function FeelingFrog({
     schedule();
     return () => {
       cancelled = true;
-      setRoamingHop(false);
+      setRoamPose(null);
       if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [mode, roamEnabled, held, flying, entrance, intervention, stolen]);
@@ -983,23 +1025,19 @@ export function FeelingFrog({
   const curious = mood === "curious";
   const grumpy = mood === "grumpy";
   // Croaking along runs slow and deliberate; curiosity is a quicker riff. A
-  // roaming leap plays the spritesheet's hop row at ten frames a second.
+  // roaming leap drives its own facing row and jump frames below.
   const animation: AnimationName = tongue
     ? "croak"
-    : roamingHop
-      ? "hop"
-      : croaking || curious
-        ? "croak"
-        : "idle";
+    : croaking || curious
+      ? "croak"
+      : "idle";
   const framesPerSecond = tongue
     ? 12
-    : roamingHop
-      ? 10
-      : croaking
-        ? 2.5
-        : curious
-          ? 8
-          : 6;
+    : croaking
+      ? 2.5
+      : curious
+        ? 8
+        : 6;
   const frame = useSpriteFrame(animation, framesPerSecond);
   // Carried and airborne poses come from fixed frames rather than the mood
   // loop: dangling while held, wide-eyed and stretched while thrown, the croak
@@ -1018,10 +1056,10 @@ export function FeelingFrog({
           column: ANIMATIONS.jump.column + HELD_FRAMES[heldPose],
           row: ANIMATIONS.jump.row,
         }
-      : roamingHop
+      : roamPose
         ? {
-            column: ANIMATIONS.hop.column + frame,
-            row: ANIMATIONS.hop.row,
+            column: roamPose.column,
+            row: roamPose.row,
           }
       : breathPhase
         ? {

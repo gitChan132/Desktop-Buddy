@@ -241,6 +241,22 @@ may still be loading when the request fires; `open_pond` also emits
 - `FROG_OPEN_PANEL=1` opens the popover at launch and `FROG_OPEN_POND=1` opens
   the pond directly, both for demos/testing.
 
+### Fun-mode leap animation
+In Fun mode (`mode === "fun"`, and only while no panel/guide is open) he hops
+around the desktop. `hopTo` builds the leap from the sheet's facing rows instead
+of a single flat hop:
+
+- The horizontal delta to the landing spot picks the facing: >48 px right turns
+  through idle rows `0 → 1 → 2`, < -48 px left through `0 → 7 → 6`, and a
+  near-vertical hop stays on row 0. Each turn frame is shown in place for
+  ~85 ms (55 ms for the front frame), so the turn reads before he leaves.
+- The arc itself (420 ms, lift 90) plays the **jump** block frames 0–3 on the
+  chosen facing row: crouch, two airborne stretches, land. Row 2 is the right
+  profile and row 6 the left profile.
+- On landing he turns back (`1 → 0` right, `7 → 0` left) and then idles facing
+  the viewer. The whole leap is driven by `roamPose` state, not the old
+  `roamingHop` boolean; set it to `null` on cancellation.
+
 The old `ControlPanel` popover is back in place; it just gained the
 **Pond settings** row.
 
