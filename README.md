@@ -29,8 +29,8 @@ mode: Focus 25s, Chill 120s, Fun 30s (default Focus).
 
 **The one exception is selection summaries.** When you highlight a long passage (400+
 chars) the frog offers to summarize it; if you accept, that passage is sent to Gemini.
-The watcher reads the selection through macOS Accessibility only, never the clipboard,
-and the offer can be switched off in the pond's settings.
+The watcher reads the selection through macOS Accessibility or Windows UI Automation
+(never the clipboard), and the offer can be switched off in the pond's settings.
 
 ## Beyond nudges
 

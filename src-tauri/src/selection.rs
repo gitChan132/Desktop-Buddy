@@ -180,7 +180,68 @@ fn selected_text(last_manual_pid: &mut i32) -> Option<String> {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+thread_local! {
+    /// UI Automation object, created once per watcher thread. COM interfaces are
+    /// apartment-bound, so this cannot live in a process-wide static.
+    static AUTOMATION: std::cell::OnceCell<windows::Win32::UI::Accessibility::IUIAutomation> =
+        const { std::cell::OnceCell::new() };
+}
+
+/// Reads the focused window's highlighted text through UI Automation.
+///
+/// Unlike macOS this needs no permission prompt, and Chromium/Electron apps turn
+/// their accessibility tree on as soon as a UIA client asks for a text pattern.
+#[cfg(target_os = "windows")]
+fn selected_text(_last_manual_pid: &mut i32) -> Option<String> {
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
+    use windows::Win32::UI::Accessibility::{
+        CUIAutomation, IUIAutomation, IUIAutomationTextPattern, UIA_TextPatternId,
+    };
+
+    let automation = AUTOMATION.with(|slot| {
+        if let Some(automation) = slot.get() {
+            return Some(automation.clone());
+        }
+        let created: windows::core::Result<IUIAutomation> =
+            unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER) };
+        let automation = created.ok()?;
+        let _ = slot.set(automation.clone());
+        Some(automation)
+    })?;
+
+    unsafe {
+        let element = automation.GetFocusedElement().ok()?;
+        // Never read selections out of password-style fields.
+        if element.CurrentIsPassword().ok()?.as_bool() {
+            return None;
+        }
+        let pattern: IUIAutomationTextPattern =
+            element.GetCurrentPatternAs(UIA_TextPatternId).ok()?;
+        let ranges = pattern.GetSelection().ok()?;
+        let count = ranges.Length().ok()?;
+        if count <= 0 {
+            return None;
+        }
+        let mut text = String::new();
+        for index in 0..count {
+            let Ok(range) = ranges.GetElement(index) else {
+                continue;
+            };
+            let Ok(part) = range.GetText(MAX_CHARS as i32) else {
+                continue;
+            };
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(&part.to_string());
+        }
+        let trimmed = text.trim();
+        Some(trimmed.to_string()).filter(|text| !text.is_empty())
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn selected_text(_last_manual_pid: &mut i32) -> Option<String> {
     None
 }
@@ -194,6 +255,14 @@ fn digest(text: &str) -> u64 {
 /// Polls the selection on a background thread for the life of the app.
 pub fn spawn(app: AppHandle) {
     std::thread::spawn(move || {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            // UI Automation needs a COM apartment on this thread before polling.
+            let _ = windows::Win32::System::Com::CoInitializeEx(
+                None,
+                windows::Win32::System::Com::COINIT_MULTITHREADED,
+            );
+        }
         // Last selection seen on the previous tick, and how many ticks it has
         // survived so far — a drag in progress keeps changing it.
         let mut previous: Option<u64> = None;

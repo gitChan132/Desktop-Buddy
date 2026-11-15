@@ -105,6 +105,12 @@ Last updated: 2026-11-14 · branch `main`
     before the webview subscribes, so it was usually swallowed. It now re-checks
     `AXIsProcessTrusted()` every tick and re-sends `selection-unavailable` every ~5 s
     until the grant lands. Keep that repeat: a single emit is unreliable.
+21. **Selection summaries were macOS-only.** `selection.rs` had a non-macOS
+    `selected_text` stub returning `None`, so on Windows the frog could never see
+    a highlight and no offer ever appeared. Windows now reads the focused
+    element's `TextPattern` selection through UI Automation (MTA apartment on the
+    watcher thread, `CurrentIsPassword` skipped). Verified with a 1.7k-character
+    Notepad selection: offer → Gemini summary rendered above the frog.
 
 ---
 
@@ -196,7 +202,10 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 - **Windows (this dev box):** everything above applies. The frog window is
   transparent/frameless; the taskbar is topmost, so the window intentionally hangs
-  below the work area by ~23 px at 125% DPI.
+  below the work area by ~23 px at 125% DPI. Selection summaries use UI Automation
+  (`windows` crate, `Win32_UI_Accessibility` + `Win32_System_Com`): a watcher-thread
+  MTA apartment, `CUIAutomation`, the focused element's `TextPattern` selection.
+  No permission prompt; password fields are skipped via `CurrentIsPassword`.
 - **macOS (teammate's machine):** rdev needs Accessibility permission; the
   window raises itself above full-screen Spaces (`lib.rs`). If wheel counting
   fails there too, check that permission first.

@@ -91,7 +91,13 @@ writes the copy.
 - Polls every 900 ms; needs ≥400 chars, stable for two ticks, 8000-char cap.
 - Cooldowns: 10 s between different offers, 120 s for the same passage. The watcher exits
   early while the `selectionSummaries` setting is off.
-- Reads the **menu-bar-owning** app's own `AXFocusedUIElement` (the system-wide
+- **Windows:** UI Automation, no permission prompt. `CoCreateInstance(CLSID_CUIAutomation)`
+  on the watcher thread (MTA apartment), `GetFocusedElement`, skip
+  `CurrentIsPassword`, then `TextPattern.GetSelection().GetElement(0).GetText(8000)`.
+  Chromium/Electron enable their accessibility tree when a UIA client asks for a text
+  pattern. Elements without a text pattern (canvas editors, toolbars) simply return
+  nothing.
+- **macOS:** reads the **menu-bar-owning** app's own `AXFocusedUIElement` (the system-wide
   `AXFocusedApplication` answers `-25204` for non-bundled processes, including the dev
   binary). Chromium apps get `AXManualAccessibility` **and** `AXEnhancedUserInterface`
   set **once per pid** — re-sending resets their tree and hands back an empty selection.
@@ -102,7 +108,8 @@ writes the copy.
   are retried after a late permission grant or an app restart. It does *not* re-send
   while an element is focused (that wipes Chromium's selection).
 - The Accessibility hint re-emits every ~5 s until `AXIsProcessTrusted()` is true, because
-  a single emit at setup usually lands before the webview subscribes.
+  a single emit at setup usually lands before the webview subscribes. Windows has no
+  equivalent hint.
 - Payload is `{ text, words }` on `selection-ready`. The frontend asks first, then calls
   `summarize_selection`, which sends the passage to Gemini (`SUMMARY_SYSTEM` prompt).
 
