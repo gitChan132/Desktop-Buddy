@@ -670,7 +670,9 @@ export function FeelingFrog({
   return (
     <div className="relative h-full w-full">
       <div className="absolute inset-x-0 bottom-[106px] flex justify-center">
-        <AnimatePresence>
+        {/* "wait" so a trigger fired over a live bubble swaps cleanly instead of
+            overlapping the old one mid-exit. */}
+        <AnimatePresence mode="wait">
           {intervention && !croaking && (
             <motion.div
               key={intervention.id}

@@ -22,6 +22,8 @@ const TRAY_ID: &str = "frog-tray";
 const PANEL_LABEL: &str = "panel";
 /// The big lilypad settings window, opened from the small popover.
 const POND_LABEL: &str = "pond";
+/// The small always-on-top trigger remote shown beside the frog.
+const REMOTE_LABEL: &str = "remote";
 const SETTINGS_EVENT: &str = "frog-settings";
 /// Fired when the pond panel is shown so the frog can hop in again.
 const PANEL_OPENED_EVENT: &str = "pond-panel-shown";
@@ -104,6 +106,7 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
                 None::<&str>,
             )?,
             &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "testing", "Test triggers…", true, None::<&str>)?,
             &MenuItem::with_id(app, "quit", "Quit Feeling Frog", true, None::<&str>)?,
         ],
     )?;
@@ -129,6 +132,7 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
                 sync_tray_checks(app);
                 broadcast_settings(app);
             }
+            "testing" => open_remote(app.clone()),
             "quit" => app.exit(0),
             _ => {}
         })
@@ -550,6 +554,55 @@ fn close_pond(app: &AppHandle) {
     let _ = app.emit("pond-hidden", PondHidden { drop });
 }
 
+/// Places the trigger remote just left of the frog, clamped to the work area,
+/// so both stay visible together.
+fn position_remote_beside_frog(app: &AppHandle, remote: &WebviewWindow) {
+    let Ok(size) = remote.outer_size() else {
+        return;
+    };
+    let mut x = 0;
+    let mut y = 0;
+    if let Some(main) = app.get_webview_window("main") {
+        if let (Ok(position), Ok(main_size)) = (main.outer_position(), main.outer_size()) {
+            x = position.x - size.width as i32 - 12;
+            y = position.y + main_size.height as i32 - size.height as i32;
+        }
+    }
+    if let Ok(Some(monitor)) = remote.current_monitor() {
+        let area = monitor.work_area();
+        let min_x = area.position.x + SCREEN_MARGIN;
+        let min_y = area.position.y + SCREEN_MARGIN;
+        let max_x = area.position.x + area.size.width as i32 - size.width as i32 - SCREEN_MARGIN;
+        let max_y = area.position.y + area.size.height as i32 - size.height as i32 - SCREEN_MARGIN;
+        if max_x > min_x {
+            x = x.clamp(min_x, max_x);
+        }
+        if max_y > min_y {
+            y = y.clamp(min_y, max_y);
+        }
+    }
+    let _ = remote.set_position(PhysicalPosition::new(x, y));
+}
+
+/// Shows the small trigger remote beside the frog. The frog stays visible; the
+/// remote is non-modal and has its own close button.
+#[tauri::command]
+fn open_remote(app: AppHandle) {
+    let Some(remote) = app.get_webview_window(REMOTE_LABEL) else {
+        return;
+    };
+    position_remote_beside_frog(&app, &remote);
+    let _ = remote.show();
+    let _ = remote.set_focus();
+}
+
+/// Testing-tab command: fire one detector with simulated input above its
+/// threshold, bypassing the intervention cooldown.
+#[tauri::command]
+async fn demo_trigger(app: AppHandle, trigger: String) -> Result<(), String> {
+    ai_engine::trigger_demo(app, trigger).await.map(|_| ())
+}
+
 /// Closes the pond and brings the frog back to the desktop.
 #[tauri::command]
 fn hide_pond(app: AppHandle) {
@@ -591,6 +644,8 @@ pub fn run() {
             start_pond_jump,
             pending_pond_jump,
             finish_pond_jump,
+            open_remote,
+            demo_trigger,
             pond_tab
         ])
         .setup(|app| {

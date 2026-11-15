@@ -173,6 +173,13 @@ export function ControlPanel() {
           >
             Modes
           </button>
+          <button
+            type="button"
+            onClick={() => void invoke("open_remote")}
+            className="pixel-button flex-1 px-2 py-1 text-[13px] uppercase leading-none text-emerald-900"
+          >
+            Test
+          </button>
         </div>
 
         <button

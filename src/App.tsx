@@ -124,7 +124,8 @@ export default function App() {
     };
   }, []);
 
-  // Auto-dismiss the bubble so it never lingers on screen.
+  // Auto-dismiss the bubble so it never lingers on screen, including demos from
+  // the Testing tab.
   useEffect(() => {
     if (!intervention) return;
     const timer = setTimeout(() => setIntervention(null), INTERVENTION_TTL_MS);

@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main overlay window",
-  "windows": ["main", "panel", "pond"],
+  "windows": ["main", "panel", "remote", "pond"],
   "permissions": [
     "core:default",
     "core:window:allow-hide",
